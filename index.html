@@ -23,6 +23,7 @@ button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
 #center{display:none;position:absolute;top:0;bottom:22px;left:50%;width:2px;margin-left:-1px;background:#c0392b;pointer-events:none}
 #info{padding:6px 10px;font-size:16px;min-height:2.2em}
 .small{color:#777;font-size:12px;padding:0 10px 8px}
+#refreshBtn{font-size:12px;padding:3px 8px}
 </style>
 </head>
 <body>
@@ -44,7 +45,9 @@ button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
 </div>
 <div id="panoBox"><div id="panoWrap"><canvas id="pano"></canvas></div><div id="center"></div></div>
 <div id="info">山名をタップすると詳細が出ます</div>
-<div class="small">スマホは写真を撮るときのように立てて持ってください。方角がずれるときは補正ボタンで合わせます。高さ方向は強調して描いています。<br>標高：国土地理院 標高タイル／山名：© OpenStreetMap contributors、Wikidata</div>
+<div class="small">スマホは写真を撮るときのように立てて持ってください。方角がずれるときは補正ボタンで合わせます。高さ方向は強調して描いています。茶色の山名は日本百名山です。<br>
+<span id="storeInfo"></span> <button id="refreshBtn">山の一覧を取り直す</button><br>
+標高：国土地理院 標高タイル／山名：Wikidata、© OpenStreetMap contributors</div>
 <script>
 const TOKEN = 'pk.eyJ1IjoiaG9yaWhha28iLCJhIjoiY211djd0ejljMDA5ZjMycHYxaTY3M3BsdSJ9.a1yefJYynC4k_YvllM5DVw';
 mapboxgl.accessToken = TOKEN;
@@ -54,7 +57,9 @@ const R = 6371000, K = 0.13;          // 地球の半径、光の曲がり具合
 const MAXD = 150000, NEAR = 15000;    // 計算する範囲、細かい地形を使う範囲（m）
 const STEP = 0.2, PXD = 12;           // 稜線を計算する角度の刻み、横1度あたりの幅
 const OFF = 60;                       // 北をまたいでつなげるための左右の余白（度）
-const WAIT = 30000;                   // 山名の問い合わせを待つ上限（ミリ秒）
+const WAIT = 30000;                   // 細かい山の問い合わせを待つ上限（ミリ秒）
+const STORE = 'yama_peaks_v1', KEEP_DAYS = 30;
+const WD = 'https://query.wikidata.org/sparql?format=json&query=';
 const BANDS = [10000, 30000, 70000, 150000];
 const COLS = ['#4a5a6e', '#6b7f9a', '#93a5bd', '#c3cfdf'];
 const DIR8 = ['北', '北東', '東', '南東', '南', '南西', '西', '北西'];
@@ -63,9 +68,10 @@ const TOP = 118, AXIS = 22, H = 360;
 const map = new mapboxgl.Map({container:'map', style:'mapbox://styles/mapbox/outdoors-v12', center:DEF, zoom:9});
 map.addControl(new mapboxgl.NavigationControl(), 'top-right');
 
-let obs = null, obsMarker = null, pick = false, running = false, note = '';
-let prof = null, allVis = [], labels = [], hits = [], selIdx = -1;
+let obs = null, obsMarker = null, pick = false, running = false, note = '', curH0 = 0, srcName = '';
+let prof = null, baseVis = [], extraVis = [], extraFor = null, allVis = [], labels = [], hits = [], selIdx = -1;
 let sync = false, head = null, sx = 0, sy = 0, gotOri = false, offset = 0;
+let peakStore = null, storeP = null;
 const tiles = new Map();
 try { offset = Number(localStorage.getItem('yama_offset')) || 0; } catch (e) {}
 
@@ -75,12 +81,13 @@ const showErr = t => { $('err').textContent = t; };
 const tick = () => new Promise(r => setTimeout(r));
 const norm360 = a => ((a % 360) + 360) % 360;
 const xOf = az => (az + OFF) * PXD;
+const obsKey = () => obs ? obs[0].toFixed(4) + ',' + obs[1].toFixed(4) : '';
 function setData(id, f) { const s = map.getSource(id); if (s) s.setData({type:'FeatureCollection', features:f}); }
 async function tfetch(url, opt, ms) {
   const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
   try { return await fetch(url, {...opt, signal:ctl.signal}); } finally { clearTimeout(t); }
 }
-const errText = e => e.name === 'AbortError' ? `${WAIT / 1000}秒で応答なし` : e.message;
+const errText = (e, ms) => e.name === 'AbortError' ? `${ms / 1000}秒で応答なし` : e.message;
 function distM(a, b) {
   const r = Math.PI / 180, dLat = (b[1] - a[1]) * r, dLon = (b[0] - a[0]) * r;
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[1] * r) * Math.cos(b[1] * r) * Math.sin(dLon / 2) ** 2;
@@ -191,7 +198,58 @@ async function computeProfile(h0) {
   return cum;
 }
 
-// ---------- 山の一覧：OpenStreetMap → だめならWikidata ----------
+// ---------- 全国の山の一覧（Wikidata）をスマホに保存 ----------
+function loadStore() {
+  try { const s = JSON.parse(localStorage.getItem(STORE) || 'null'); if (s && Array.isArray(s.list) && s.list.length) return s; } catch (e) {}
+  return null;
+}
+function saveStore(list) {
+  try { localStorage.setItem(STORE, JSON.stringify({t:Date.now(), list})); } catch (e) { showErr('スマホへの保存に失敗しました（容量不足の可能性）'); }
+}
+function showStoreInfo() {
+  $('storeInfo').textContent = peakStore
+    ? `保存済みの山：${peakStore.list.length.toLocaleString()}座（${new Date(peakStore.t).toLocaleDateString('ja-JP')}取得）`
+    : '山の一覧はまだ保存されていません';
+}
+async function fetchJapan() {
+  const q = `SELECT ?i ?l ?c ?e WHERE {
+    VALUES ?t { wd:Q8502 wd:Q8072 wd:Q169358 wd:Q54050 }
+    ?i wdt:P31 ?t; wdt:P17 wd:Q17; wdt:P625 ?c.
+    OPTIONAL { ?i wdt:P2044 ?e }
+    ?i rdfs:label ?l. FILTER(LANG(?l) = "ja")
+  }`;
+  const r = await tfetch(WD + encodeURIComponent(q), {}, 90000);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json(), byId = new Map();
+  ((j.results && j.results.bindings) || []).forEach(b => {
+    const m = /Point\(([-\d.]+) ([-\d.]+)\)/.exec(b.c.value);
+    if (!m) return;
+    const e = b.e ? Math.round(parseFloat(b.e.value)) : 0, old = byId.get(b.i.value);
+    if (old) { if (e > old[3]) old[3] = e; return; }
+    byId.set(b.i.value, [b.l.value, +(+m[1]).toFixed(4), +(+m[2]).toFixed(4), isFinite(e) ? e : 0, 0]);
+  });
+  try { // 日本百名山の印
+    const q2 = `SELECT ?i WHERE { ?h rdfs:label "日本百名山"@ja. ?i wdt:P361 ?h. }`;
+    const r2 = await tfetch(WD + encodeURIComponent(q2), {}, 30000);
+    if (r2.ok) ((await r2.json()).results.bindings || []).forEach(b => { const v = byId.get(b.i.value); if (v) v[4] = 1; });
+  } catch (e) {}
+  if (!byId.size) throw new Error('一覧が空でした');
+  return [...byId.values()];
+}
+function getJapan() {
+  if (peakStore) return Promise.resolve(peakStore.list);
+  if (!storeP) storeP = fetchJapan().then(list => {
+    saveStore(list); peakStore = {t:Date.now(), list}; showStoreInfo(); return list;
+  }).finally(() => { storeP = null; });
+  return storeP;
+}
+function nearList(list) {
+  const dLat = MAXD / 110574 + 0.01, dLon = MAXD / (111320 * Math.cos(obs[1] * Math.PI / 180)) + 0.01;
+  return list.filter(v => Math.abs(v[2] - obs[1]) < dLat && Math.abs(v[1] - obs[0]) < dLon)
+    .map(v => ({lon:v[1], lat:v[2], tags:{name:v[0], ele:String(v[3] || '')}, f100:v[4]}));
+}
+
+// ---------- 細かい山（OpenStreetMap） ----------
 async function fromOsm() {
   const dLat = MAXD / 110574, dLon = MAXD / (111320 * Math.cos(obs[1] * Math.PI / 180));
   const bb = [obs[1] - dLat, obs[0] - dLon, obs[1] + dLat, obs[0] + dLon].map(v => v.toFixed(4)).join(',');
@@ -201,47 +259,39 @@ async function fromOsm() {
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return (await r.json()).elements || [];
 }
-async function fromWikidata() {
-  const q = `SELECT ?i ?l ?c ?e WHERE {
-    VALUES ?t { wd:Q8502 wd:Q8072 wd:Q169358 wd:Q54050 }
-    ?i wdt:P31 ?t; wdt:P17 wd:Q17; wdt:P625 ?c.
-    FILTER(geof:distance(?c, "Point(${obs[0].toFixed(4)} ${obs[1].toFixed(4)})"^^geo:wktLiteral) < ${MAXD / 1000})
-    OPTIONAL { ?i wdt:P2044 ?e }
-    ?i rdfs:label ?l. FILTER(LANG(?l) = "ja")
-  }`;
-  const r = await tfetch('https://query.wikidata.org/sparql?format=json&query=' + encodeURIComponent(q), {}, WAIT);
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  const j = await r.json(), byId = new Map();
-  ((j.results && j.results.bindings) || []).forEach(b => {
-    const m = /Point\(([-\d.]+) ([-\d.]+)\)/.exec(b.c.value);
-    if (!m) return;
-    const e = b.e ? parseFloat(b.e.value) : NaN, old = byId.get(b.i.value);
-    if (old) { if (isFinite(e) && !(Number(old.tags.ele) >= e)) old.tags.ele = String(e); return; }
-    byId.set(b.i.value, {lon:+m[1], lat:+m[2], tags:{name:b.l.value, ele:isFinite(e) ? String(e) : ''}});
-  });
-  return [...byId.values()];
+async function addExtra() {
+  const key = obsKey();
+  if (extraFor === key || !prof) return;
+  status('細かい山を問い合わせ中…（混んでいるときは最大30秒）');
+  try {
+    const els = await fromOsm();
+    if (key !== obsKey()) return;
+    const base = baseVis.map(v => v.p), baseNames = baseVis.map(v => v.name);
+    const fresh = els.filter(e => {
+      const p = [e.lon, e.lat], n = e.tags && (e.tags['name:ja'] || e.tags.name);
+      return !base.some((b, i) => { const d = distM(b, p); return d < 150 || (baseNames[i] === n && d < 3000); });
+    });
+    extraVis = (await checkPeaks(fresh, curH0)).map(v => ({...v, extra:true}));
+    extraFor = key;
+    refreshLabels(); doneStatus();
+  } catch (e) { showErr('細かい山の取得に失敗：' + errText(e, WAIT) + '（少し待ってチェックを入れ直してください）'); doneStatus(); }
 }
-async function fetchPeaks() {
-  const errs = [];
-  try { return {els:await fromOsm(), src:'OpenStreetMap'}; } catch (e) { errs.push('OpenStreetMap：' + errText(e)); }
-  try { return {els:await fromWikidata(), src:'Wikidata（有名な山が中心）'}; } catch (e) { errs.push('Wikidata：' + errText(e)); }
-  showErr('山名を取得できませんでした。少し待って「現在地で計算」を押し直してください　' + errs.join(' ／ '));
-  return {els:[], src:'なし'};
-}
+
+// ---------- 見えるかの判定 ----------
 async function checkPeaks(els, h0) {
   const vis = [];
   for (let k = 0; k < els.length; k++) {
     const e = els[k], p = [e.lon, e.lat], D = distM(obs, p);
     if (D < 200 || D > MAXD || !e.tags) continue;
-    const osmH = parseFloat(String(e.tags.ele || '').replace(/[^\d.]/g, ''));
-    const h = Math.max(isFinite(osmH) ? osmH : 0, elev(p, D));
+    const tagH = parseFloat(String(e.tags.ele || '').replace(/[^\d.]/g, ''));
+    const h = Math.max(isFinite(tagH) ? tagH : 0, elev(p, D));
     const az = brg(obs, p), target = ang(h, D, h0), stop = D - Math.max(150, D * 0.015);
     let d = 30, ok = true;
     while (d < stop) {
       if (ang(elev(dest(obs, az, d), d), d, h0) > target + 0.02) { ok = false; break; }
       d += Math.max(30, d * 0.008);
     }
-    if (ok) vis.push({name:e.tags['name:ja'] || e.tags.name, h:Math.round(h), d:D, az, a:target, p});
+    if (ok) vis.push({name:e.tags['name:ja'] || e.tags.name, h:Math.round(h), d:D, az, a:target, p, f100:e.f100 || 0});
     if (k % 200 === 0) { status(`見える山を判定中… ${k}/${els.length}`); await tick(); }
   }
   return vis;
@@ -249,11 +299,19 @@ async function checkPeaks(els, h0) {
 function placeLabels() {
   const sp = $('many').checked ? 11 : 17, W = 360 * PXD;
   labels = [];
-  [...allVis].sort((x, y) => y.h - x.h).forEach(v => {
+  [...allVis].sort((x, y) => (y.h + y.f100 * 3000) - (x.h + x.f100 * 3000)).forEach(v => {
     const x = v.az * PXD;
     if (labels.some(l => { const dx = Math.abs(l.az * PXD - x); return dx < sp || dx > W - sp; })) return;
     labels.push(v);
   });
+}
+function refreshLabels() {
+  allVis = baseVis.concat($('many').checked ? extraVis : []);
+  placeLabels(); selIdx = -1; draw(); showInfo();
+}
+function doneStatus() {
+  const extra = $('many').checked && extraFor === obsKey() ? `＋細かい山 ${extraVis.length}座` : '';
+  status(`${note}見える山 ${baseVis.length}座${extra}（表示 ${labels.length}座）　山名：${srcName}　この地点の標高 約${Math.round(curH0)}m`);
 }
 
 // ---------- パノラマ図 ----------
@@ -288,15 +346,16 @@ function draw() {
   }
   labels.forEach((l, k) => {
     const sel = k === selIdx, name = l.name.length > 7 ? l.name.slice(0, 7) : l.name, py = y(l.a);
+    const col = sel ? '#c0392b' : (l.f100 ? '#8b4513' : '#222');
     [-360, 0, 360].forEach(s => {
       const x = xOf(l.az + s);
       if (x < -20 || x > W + 20) return;
       hits.push({x, k});
-      g.strokeStyle = sel ? '#c0392b' : '#555'; g.lineWidth = sel ? 2 : 1;
+      g.strokeStyle = sel ? '#c0392b' : (l.f100 ? '#8b4513' : '#555'); g.lineWidth = sel || l.f100 ? 2 : 1;
       g.beginPath(); g.moveTo(x, 8 + name.length * 14); g.lineTo(x, py); g.stroke();
-      g.fillStyle = sel ? '#c0392b' : '#222'; g.font = (sel ? 'bold ' : '') + '13px sans-serif';
+      g.fillStyle = col; g.font = (sel || l.f100 ? 'bold ' : '') + '13px sans-serif';
       for (let i = 0; i < name.length; i++) g.fillText(name[i], x, 18 + i * 14);
-      g.beginPath(); g.arc(x, py, 2.5, 0, 7); g.fill();
+      g.beginPath(); g.arc(x, py, l.f100 ? 3.5 : 2.5, 0, 7); g.fill();
     });
   });
 }
@@ -310,7 +369,7 @@ $('pano').onclick = e => {
 function showInfo() {
   const l = labels[selIdx];
   if (!l) { $('info').textContent = '山名をタップすると詳細が出ます'; setData('sel', []); return; }
-  $('info').textContent = `${l.name}　標高${l.h.toLocaleString()}m・${dirName(l.az)}（方位${Math.round(l.az)}°）・${(l.d / 1000).toFixed(1)}km`;
+  $('info').textContent = `${l.name}${l.f100 ? '（日本百名山）' : ''}　標高${l.h.toLocaleString()}m・${dirName(l.az)}（方位${Math.round(l.az)}°）・${(l.d / 1000).toFixed(1)}km`;
   setData('sel', [{type:'Feature', properties:{}, geometry:{type:'LineString', coordinates:[obs, l.p]}}]);
 }
 
@@ -366,22 +425,33 @@ showOffset();
 // ---------- 実行 ----------
 async function run(p) {
   if (running) return;
-  running = true; obs = p; selIdx = -1; prof = null; labels = []; allVis = [];
+  running = true; obs = p; selIdx = -1; prof = null; labels = []; allVis = []; baseVis = []; extraVis = []; extraFor = null;
   showErr(''); draw(); showInfo(); placeObs();
   try {
-    const peaksP = fetchPeaks();
+    const listP = getJapan().catch(e => { showErr('全国の山の一覧を取得できませんでした：' + errText(e, 90000)); return null; });
     await loadAll(tileList(obs, MAXD, 10).concat(tileList(obs, NEAR + 2000, 12)));
-    const h0 = elev(obs, 0) + Math.max(0, Number($('eye').value) || 0);
-    prof = await computeProfile(h0);
+    curH0 = elev(obs, 0) + Math.max(0, Number($('eye').value) || 0);
+    prof = await computeProfile(curH0);
     draw(); // 山並みを先に表示
-    status('山名を取得中…（混んでいるときは最大30秒ほど待って予備に切り替えます）');
-    const got = await peaksP;
-    allVis = await checkPeaks(got.els, h0);
-    placeLabels(); draw();
+    status(peakStore ? '山名を判定中…' : '全国の山の一覧を初回取得中…（初回のみ数十秒）');
+    const list = await listP;
+    let els;
+    if (list) { els = nearList(list); srcName = 'スマホに保存した一覧'; }
+    else {
+      status('周辺の山名を問い合わせ中…（最大30秒）');
+      try { els = await fromOsm(); srcName = 'OpenStreetMap'; }
+      catch (e) { els = []; srcName = 'なし'; showErr('山名を取得できませんでした：' + errText(e, WAIT) + '（少し待って「現在地で計算」を押し直してください）'); }
+    }
+    baseVis = await checkPeaks(els, curH0);
+    refreshLabels();
     if (labels[0] && !sync) scrollToAz(labels[0].az);
-    status(`${note}見える山 ${allVis.length}座（表示 ${labels.length}座）　山名：${got.src}　この地点の標高 約${Math.round(h0)}m`);
+    doneStatus();
   } catch (e) { showErr('計算エラー：' + e.message); }
   finally { running = false; }
+  if ($('many').checked) addExtra();
+  if (peakStore && Date.now() - peakStore.t > KEEP_DAYS * 86400000) {
+    fetchJapan().then(list => { saveStore(list); peakStore = {t:Date.now(), list}; showStoreInfo(); }).catch(() => {});
+  }
 }
 function useGps() {
   if (!('geolocation' in navigator)) { note = '※現在地が使えないため南大沢付近で計算　'; run(DEF); return; }
@@ -393,9 +463,19 @@ function useGps() {
 }
 $('gpsBtn').onclick = useGps;
 $('pickBtn').onclick = () => { pick = true; status('地図上の地点をタップしてください'); };
-$('many').onchange = () => { placeLabels(); selIdx = -1; draw(); showInfo(); };
+$('many').onchange = () => { refreshLabels(); doneStatus(); if ($('many').checked && !running) addExtra(); };
 $('eye').onchange = () => { if (obs) run(obs); };
+$('refreshBtn').onclick = () => {
+  if (running || storeP) return;
+  if (!confirm('全国の山の一覧を取り直します（数十秒かかります）。よろしいですか？')) return;
+  peakStore = null;
+  try { localStorage.removeItem(STORE); } catch (e) {}
+  showStoreInfo();
+  if (obs) run(obs); else getJapan().catch(e => showErr('取得に失敗：' + errText(e, 90000)));
+};
 document.querySelectorAll('button[data-az]').forEach(b => b.onclick = () => { setSync(false); scrollToAz(Number(b.dataset.az)); });
+peakStore = loadStore();
+showStoreInfo();
 draw();
 useGps();
 </script>
