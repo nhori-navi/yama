@@ -44,7 +44,7 @@ button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
 </div>
 <div id="panoBox"><div id="panoWrap"><canvas id="pano"></canvas></div><div id="center"></div></div>
 <div id="info">山名をタップすると詳細が出ます</div>
-<div class="small">スマホは写真を撮るときのように立てて持ってください。方角がずれるときは補正ボタンで合わせます。高さ方向は強調して描いています。<br>標高：国土地理院 標高タイル／山名：© OpenStreetMap contributors</div>
+<div class="small">スマホは写真を撮るときのように立てて持ってください。方角がずれるときは補正ボタンで合わせます。高さ方向は強調して描いています。<br>標高：国土地理院 標高タイル／山名：© OpenStreetMap contributors、Wikidata</div>
 <script>
 const TOKEN = 'pk.eyJ1IjoiaG9yaWhha28iLCJhIjoiY211djd0ejljMDA5ZjMycHYxaTY3M3BsdSJ9.a1yefJYynC4k_YvllM5DVw';
 mapboxgl.accessToken = TOKEN;
@@ -54,11 +54,10 @@ const R = 6371000, K = 0.13;          // 地球の半径、光の曲がり具合
 const MAXD = 150000, NEAR = 15000;    // 計算する範囲、細かい地形を使う範囲（m）
 const STEP = 0.2, PXD = 12;           // 稜線を計算する角度の刻み、横1度あたりの幅
 const OFF = 60;                       // 北をまたいでつなげるための左右の余白（度）
+const WAIT = 30000;                   // 山名の問い合わせを待つ上限（ミリ秒）
 const BANDS = [10000, 30000, 70000, 150000];
 const COLS = ['#4a5a6e', '#6b7f9a', '#93a5bd', '#c3cfdf'];
 const DIR8 = ['北', '北東', '東', '南東', '南', '南西', '西', '北西'];
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter'];
 const TOP = 118, AXIS = 22, H = 360;
 
 const map = new mapboxgl.Map({container:'map', style:'mapbox://styles/mapbox/outdoors-v12', center:DEF, zoom:9});
@@ -77,6 +76,11 @@ const tick = () => new Promise(r => setTimeout(r));
 const norm360 = a => ((a % 360) + 360) % 360;
 const xOf = az => (az + OFF) * PXD;
 function setData(id, f) { const s = map.getSource(id); if (s) s.setData({type:'FeatureCollection', features:f}); }
+async function tfetch(url, opt, ms) {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
+  try { return await fetch(url, {...opt, signal:ctl.signal}); } finally { clearTimeout(t); }
+}
+const errText = e => e.name === 'AbortError' ? `${WAIT / 1000}秒で応答なし` : e.message;
 function distM(a, b) {
   const r = Math.PI / 180, dLat = (b[1] - a[1]) * r, dLon = (b[0] - a[0]) * r;
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[1] * r) * Math.cos(b[1] * r) * Math.sin(dLon / 2) ** 2;
@@ -187,22 +191,42 @@ async function computeProfile(h0) {
   return cum;
 }
 
-// ---------- 山の一覧（OpenStreetMap）と見えるかの判定 ----------
-async function fetchPeaks() {
+// ---------- 山の一覧：OpenStreetMap → だめならWikidata ----------
+async function fromOsm() {
   const dLat = MAXD / 110574, dLon = MAXD / (111320 * Math.cos(obs[1] * Math.PI / 180));
   const bb = [obs[1] - dLat, obs[0] - dLon, obs[1] + dLat, obs[0] + dLon].map(v => v.toFixed(4)).join(',');
-  const q = `[out:json][timeout:90];node["natural"~"^(peak|volcano)$"]["name"](${bb});out body;`;
+  const q = `[out:json][timeout:25];node["natural"~"^(peak|volcano)$"]["name"](${bb});out body;`;
+  const r = await tfetch('https://overpass-api.de/api/interpreter', {method:'POST', body:'data=' + encodeURIComponent(q),
+    headers:{'Content-Type':'application/x-www-form-urlencoded'}}, WAIT);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return (await r.json()).elements || [];
+}
+async function fromWikidata() {
+  const q = `SELECT ?i ?l ?c ?e WHERE {
+    VALUES ?t { wd:Q8502 wd:Q8072 wd:Q169358 wd:Q54050 }
+    ?i wdt:P31 ?t; wdt:P17 wd:Q17; wdt:P625 ?c.
+    FILTER(geof:distance(?c, "Point(${obs[0].toFixed(4)} ${obs[1].toFixed(4)})"^^geo:wktLiteral) < ${MAXD / 1000})
+    OPTIONAL { ?i wdt:P2044 ?e }
+    ?i rdfs:label ?l. FILTER(LANG(?l) = "ja")
+  }`;
+  const r = await tfetch('https://query.wikidata.org/sparql?format=json&query=' + encodeURIComponent(q), {}, WAIT);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json(), byId = new Map();
+  ((j.results && j.results.bindings) || []).forEach(b => {
+    const m = /Point\(([-\d.]+) ([-\d.]+)\)/.exec(b.c.value);
+    if (!m) return;
+    const e = b.e ? parseFloat(b.e.value) : NaN, old = byId.get(b.i.value);
+    if (old) { if (isFinite(e) && !(Number(old.tags.ele) >= e)) old.tags.ele = String(e); return; }
+    byId.set(b.i.value, {lon:+m[1], lat:+m[2], tags:{name:b.l.value, ele:isFinite(e) ? String(e) : ''}});
+  });
+  return [...byId.values()];
+}
+async function fetchPeaks() {
   const errs = [];
-  for (const url of OVERPASS) {
-    try {
-      const r = await fetch(url, {method:'POST', body:'data=' + encodeURIComponent(q),
-        headers:{'Content-Type':'application/x-www-form-urlencoded'}});
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return (await r.json()).elements || [];
-    } catch (e) { errs.push(url.split('/')[2] + '：' + e.message); }
-  }
-  showErr('山の一覧の取得に失敗（少し待って「現在地で計算」を押し直してください）　' + errs.join(' ／ '));
-  return [];
+  try { return {els:await fromOsm(), src:'OpenStreetMap'}; } catch (e) { errs.push('OpenStreetMap：' + errText(e)); }
+  try { return {els:await fromWikidata(), src:'Wikidata（有名な山が中心）'}; } catch (e) { errs.push('Wikidata：' + errText(e)); }
+  showErr('山名を取得できませんでした。少し待って「現在地で計算」を押し直してください　' + errs.join(' ／ '));
+  return {els:[], src:'なし'};
 }
 async function checkPeaks(els, h0) {
   const vis = [];
@@ -349,11 +373,13 @@ async function run(p) {
     await loadAll(tileList(obs, MAXD, 10).concat(tileList(obs, NEAR + 2000, 12)));
     const h0 = elev(obs, 0) + Math.max(0, Number($('eye').value) || 0);
     prof = await computeProfile(h0);
-    status('山の一覧を取得中…');
-    allVis = await checkPeaks(await peaksP, h0);
+    draw(); // 山並みを先に表示
+    status('山名を取得中…（混んでいるときは最大30秒ほど待って予備に切り替えます）');
+    const got = await peaksP;
+    allVis = await checkPeaks(got.els, h0);
     placeLabels(); draw();
     if (labels[0] && !sync) scrollToAz(labels[0].az);
-    status(`${note}見える山 ${allVis.length}座（表示 ${labels.length}座）　この地点の標高 約${Math.round(h0)}m`);
+    status(`${note}見える山 ${allVis.length}座（表示 ${labels.length}座）　山名：${got.src}　この地点の標高 約${Math.round(h0)}m`);
   } catch (e) { showErr('計算エラー：' + e.message); }
   finally { running = false; }
 }
