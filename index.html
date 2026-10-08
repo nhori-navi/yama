@@ -58,7 +58,7 @@ const MAXD = 150000, NEAR = 15000;    // 計算する範囲、細かい地形を
 const STEP = 0.2, PXD = 12;           // 稜線を計算する角度の刻み、横1度あたりの幅
 const OFF = 60;                       // 北をまたいでつなげるための左右の余白（度）
 const WAIT = 30000, WD_WAIT = 70000;  // 問い合わせを待つ上限（ミリ秒）
-const FETCH_KM = 250;                 // Wikidataから一度に取る半径（km）
+const FETCH_KM = 200;                 // Wikidataから一度に取る半径（km）
 const STORE = 'yama_peaks_v2', KEEP_DAYS = 30;
 const WD = 'https://query.wikidata.org/sparql?format=json&query=';
 const BANDS = [10000, 30000, 70000, 150000];
@@ -88,6 +88,12 @@ async function tfetch(url, opt, ms) {
   try { return await fetch(url, {...opt, signal:ctl.signal}); } finally { clearTimeout(t); }
 }
 const errText = (e, ms) => e.name === 'AbortError' ? `${ms / 1000}秒で応答なし` : e.message;
+// Wikidataの返事を読む（時間切れで途中までしか届かなかった場合を見分ける）
+async function readWd(r) {
+  const text = await r.text();
+  try { return JSON.parse(text); }
+  catch (e) { throw new Error(/timeout/i.test(text) ? '時間切れ（Wikidataが混雑）' : 'データが途中で切れていました'); }
+}
 function distM(a, b) {
   const r = Math.PI / 180, dLat = (b[1] - a[1]) * r, dLon = (b[0] - a[0]) * r;
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[1] * r) * Math.cos(b[1] * r) * Math.sin(dLon / 2) ** 2;
@@ -199,7 +205,7 @@ async function computeProfile(h0) {
 }
 
 // ---------- 山の一覧（Wikidata）を地域ごとにスマホへ保存 ----------
-// 保存形式：{regions:[{c:[経度,緯度], t:取得日時}], list:[[名前, 経度, 緯度, 標高, 百名山=1, ID]]}
+// 保存形式：{regions:[{c:[経度,緯度], r:半径km, t:取得日時}], list:[[名前, 経度, 緯度, 標高, 百名山=1, ID]]}
 function loadStore() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE) || 'null');
@@ -217,18 +223,23 @@ function showStoreInfo() {
     : '山の一覧はまだ保存されていません';
 }
 // この地点の計算範囲をまるごと含む保存済み地域
-const coveringRegion = (s, p) => s.regions.find(r => distM(r.c, p) <= FETCH_KM * 1000 - MAXD);
+const coveringRegion = (s, p) => s.regions.find(r => distM(r.c, p) <= (r.r || FETCH_KM) * 1000 - MAXD);
 async function fetchRegion(center) {
+  // 位置の索引で近くの場所を先に絞り込み、その中から山を探す
   const q = `SELECT ?i ?l ?c ?e WHERE {
+    SERVICE wikibase:around {
+      ?i wdt:P625 ?c.
+      bd:serviceParam wikibase:center "Point(${center[0].toFixed(4)} ${center[1].toFixed(4)})"^^geo:wktLiteral.
+      bd:serviceParam wikibase:radius "${FETCH_KM}".
+    }
     VALUES ?t { wd:Q8502 wd:Q8072 wd:Q169358 wd:Q54050 }
-    ?i wdt:P31 ?t; wdt:P17 wd:Q17; wdt:P625 ?c.
-    FILTER(geof:distance(?c, "Point(${center[0].toFixed(4)} ${center[1].toFixed(4)})"^^geo:wktLiteral) < ${FETCH_KM})
+    ?i wdt:P31 ?t.
     OPTIONAL { ?i wdt:P2044 ?e }
     ?i rdfs:label ?l. FILTER(LANG(?l) = "ja")
   }`;
   const r = await tfetch(WD + encodeURIComponent(q), {}, WD_WAIT);
   if (!r.ok) throw new Error('HTTP ' + r.status);
-  const j = await r.json(), byId = new Map();
+  const j = await readWd(r), byId = new Map();
   ((j.results && j.results.bindings) || []).forEach(b => {
     const m = /Point\(([-\d.]+) ([-\d.]+)\)/.exec(b.c.value);
     if (!m) return;
@@ -239,7 +250,7 @@ async function fetchRegion(center) {
   try { // 日本百名山の印
     const q2 = `SELECT ?i WHERE { ?h rdfs:label "日本百名山"@ja. ?i wdt:P361 ?h. }`;
     const r2 = await tfetch(WD + encodeURIComponent(q2), {}, WAIT);
-    if (r2.ok) ((await r2.json()).results.bindings || []).forEach(b => {
+    if (r2.ok) ((await readWd(r2)).results.bindings || []).forEach(b => {
       const v = byId.get(b.i.value.replace(/.*\//, '')); if (v) v[4] = 1;
     });
   } catch (e) {}
@@ -247,7 +258,7 @@ async function fetchRegion(center) {
   const s = loadStore(), all = new Map(s.list.map(v => [v[5], v]));
   byId.forEach((v, id) => all.set(id, v));
   s.list = [...all.values()];
-  s.regions = s.regions.filter(x => distM(x.c, center) > 1000).concat([{c:center, t:Date.now()}]);
+  s.regions = s.regions.filter(x => distM(x.c, center) > 1000).concat([{c:center, r:FETCH_KM, t:Date.now()}]);
   saveStore(s); showStoreInfo();
   return s;
 }
