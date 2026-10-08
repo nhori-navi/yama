@@ -9,14 +9,18 @@
 <style>
 *{box-sizing:border-box}
 body{margin:0;font-family:sans-serif;font-size:15px;background:#fafafa}
-#map{height:32vh;width:100%}
+#map{height:30vh;width:100%}
 #ctrl{padding:6px 10px}
 button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
 #eye{width:64px}
+#syncBtn.on{background:#c0392b;color:#fff;border:1px solid #c0392b;border-radius:4px}
+#dirInfo{font-size:15px;font-weight:bold;color:#c0392b;min-height:1.3em}
 #status{font-size:13px;color:#555;margin:3px 0}
 #err{font-size:12px;color:#c00}
+#panoBox{position:relative}
 #panoWrap{overflow-x:auto;overflow-y:hidden;border-top:1px solid #ccc;border-bottom:1px solid #ccc}
 #pano{display:block}
+#center{display:none;position:absolute;top:0;bottom:22px;left:50%;width:2px;margin-left:-1px;background:#c0392b;pointer-events:none}
 #info{padding:6px 10px;font-size:16px;min-height:2.2em}
 .small{color:#777;font-size:12px;padding:0 10px 8px}
 </style>
@@ -28,14 +32,19 @@ button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
   目の高さ <input id="eye" type="number" value="2" min="0" step="1">m
   <label><input type="checkbox" id="many">小さな山も表示</label>
   <div>
+    <button id="syncBtn">向きに合わせる</button>
+    補正 <button id="offMinus">−2°</button><span id="offVal">0°</span><button id="offPlus">＋2°</button>
+  </div>
+  <div>
     向き：<button data-az="0">北</button><button data-az="90">東</button><button data-az="180">南</button><button data-az="270">西</button>
   </div>
+  <div id="dirInfo"></div>
   <div id="status">現在地を取得中…</div>
   <div id="err"></div>
 </div>
-<div id="panoWrap"><canvas id="pano"></canvas></div>
+<div id="panoBox"><div id="panoWrap"><canvas id="pano"></canvas></div><div id="center"></div></div>
 <div id="info">山名をタップすると詳細が出ます</div>
-<div class="small">高さ方向は強調して描いています。標高：国土地理院 標高タイル／山名：© OpenStreetMap contributors</div>
+<div class="small">スマホは写真を撮るときのように立てて持ってください。方角がずれるときは補正ボタンで合わせます。高さ方向は強調して描いています。<br>標高：国土地理院 標高タイル／山名：© OpenStreetMap contributors</div>
 <script>
 const TOKEN = 'pk.eyJ1IjoiaG9yaWhha28iLCJhIjoiY211djd0ejljMDA5ZjMycHYxaTY3M3BsdSJ9.a1yefJYynC4k_YvllM5DVw';
 mapboxgl.accessToken = TOKEN;
@@ -44,23 +53,29 @@ const DEF = [139.38, 35.61]; // 現在地が取れないときの地点（南大
 const R = 6371000, K = 0.13;          // 地球の半径、光の曲がり具合
 const MAXD = 150000, NEAR = 15000;    // 計算する範囲、細かい地形を使う範囲（m）
 const STEP = 0.2, PXD = 12;           // 稜線を計算する角度の刻み、横1度あたりの幅
+const OFF = 60;                       // 北をまたいでつなげるための左右の余白（度）
 const BANDS = [10000, 30000, 70000, 150000];
 const COLS = ['#4a5a6e', '#6b7f9a', '#93a5bd', '#c3cfdf'];
 const DIR8 = ['北', '北東', '東', '南東', '南', '南西', '西', '北西'];
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter'];
 const TOP = 118, AXIS = 22, H = 360;
 
 const map = new mapboxgl.Map({container:'map', style:'mapbox://styles/mapbox/outdoors-v12', center:DEF, zoom:9});
 map.addControl(new mapboxgl.NavigationControl(), 'top-right');
 
 let obs = null, obsMarker = null, pick = false, running = false, note = '';
-let prof = null, allVis = [], labels = [], selIdx = -1;
+let prof = null, allVis = [], labels = [], hits = [], selIdx = -1;
+let sync = false, head = null, sx = 0, sy = 0, gotOri = false, offset = 0;
 const tiles = new Map();
+try { offset = Number(localStorage.getItem('yama_offset')) || 0; } catch (e) {}
 
 // ---------- 共通 ----------
 const status = t => { $('status').textContent = t; };
 const showErr = t => { $('err').textContent = t; };
 const tick = () => new Promise(r => setTimeout(r));
+const norm360 = a => ((a % 360) + 360) % 360;
+const xOf = az => (az + OFF) * PXD;
 function setData(id, f) { const s = map.getSource(id); if (s) s.setData({type:'FeatureCollection', features:f}); }
 function distM(a, b) {
   const r = Math.PI / 180, dLat = (b[1] - a[1]) * r, dLon = (b[0] - a[0]) * r;
@@ -71,7 +86,7 @@ function brg(a, b) {
   const r = Math.PI / 180, dl = (b[0] - a[0]) * r;
   const y = Math.sin(dl) * Math.cos(b[1] * r);
   const x = Math.cos(a[1] * r) * Math.sin(b[1] * r) - Math.sin(a[1] * r) * Math.cos(b[1] * r) * Math.cos(dl);
-  return (Math.atan2(y, x) / r + 360) % 360;
+  return norm360(Math.atan2(y, x) / r);
 }
 function dest(p, az, d) {
   const r = Math.PI / 180, la1 = p[1] * r, lo1 = p[0] * r, a = az * r, dr = d / R;
@@ -79,7 +94,7 @@ function dest(p, az, d) {
   const lo2 = lo1 + Math.atan2(Math.sin(a) * Math.sin(dr) * Math.cos(la1), Math.cos(dr) - Math.sin(la1) * Math.sin(la2));
   return [lo2 / r, la2 / r];
 }
-const dirName = az => DIR8[Math.round(az / 45) % 8];
+const dirName = az => DIR8[Math.round(norm360(az) / 45) % 8];
 // 見上げる角度（度）：地球の丸みと光の曲がりを考慮
 const ang = (h, d, h0) => Math.atan((h - h0 - d * d / (2 * R) * (1 - K)) / d) * 180 / Math.PI;
 function circle(c, m) {
@@ -177,14 +192,16 @@ async function fetchPeaks() {
   const dLat = MAXD / 110574, dLon = MAXD / (111320 * Math.cos(obs[1] * Math.PI / 180));
   const bb = [obs[1] - dLat, obs[0] - dLon, obs[1] + dLat, obs[0] + dLon].map(v => v.toFixed(4)).join(',');
   const q = `[out:json][timeout:90];node["natural"~"^(peak|volcano)$"]["name"](${bb});out body;`;
+  const errs = [];
   for (const url of OVERPASS) {
     try {
       const r = await fetch(url, {method:'POST', body:'data=' + encodeURIComponent(q),
         headers:{'Content-Type':'application/x-www-form-urlencoded'}});
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return (await r.json()).elements || [];
-    } catch (e) { showErr('山の一覧の取得に失敗（' + url.split('/')[2] + '）：' + e.message); }
+    } catch (e) { errs.push(url.split('/')[2] + '：' + e.message); }
   }
+  showErr('山の一覧の取得に失敗（少し待って「現在地で計算」を押し直してください）　' + errs.join(' ／ '));
   return [];
 }
 async function checkPeaks(els, h0) {
@@ -210,20 +227,21 @@ function placeLabels() {
   labels = [];
   [...allVis].sort((x, y) => y.h - x.h).forEach(v => {
     const x = v.az * PXD;
-    if (labels.some(l => { const dx = Math.abs(l.x - x); return dx < sp || dx > W - sp; })) return;
-    labels.push({...v, x});
+    if (labels.some(l => { const dx = Math.abs(l.az * PXD - x); return dx < sp || dx > W - sp; })) return;
+    labels.push(v);
   });
 }
 
 // ---------- パノラマ図 ----------
 function draw() {
-  const W = Math.round(360 * PXD), c = $('pano'), dpr = Math.min(2, window.devicePixelRatio || 1);
+  const W = Math.round((360 + OFF * 2) * PXD), c = $('pano'), dpr = Math.min(2, window.devicePixelRatio || 1);
   c.width = W * dpr; c.height = H * dpr; c.style.width = W + 'px'; c.style.height = H + 'px';
   const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
   const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#d8e6f5'); sky.addColorStop(1, '#f6f9fc');
   g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  hits = [];
   if (!prof) return;
-  const far = prof[prof.length - 1];
+  const N = prof[0].length, offN = Math.round(OFF / STEP), far = prof[prof.length - 1];
   let lo = Infinity, hi = -Infinity;
   far.forEach(v => { if (v < lo) lo = v; if (v > hi) hi = v; });
   labels.forEach(l => { if (l.a > hi) hi = l.a; });
@@ -232,31 +250,37 @@ function draw() {
   for (let b = BANDS.length - 1; b >= 0; b--) {
     const arr = prof[b];
     g.beginPath(); g.moveTo(0, plotBot);
-    for (let i = 0; i < arr.length; i++) g.lineTo(i * STEP * PXD, y(arr[i]));
-    g.lineTo(W, y(arr[0])); g.lineTo(W, plotBot); g.closePath();
+    for (let k = -offN; k <= N + offN; k++) g.lineTo(xOf(k * STEP), y(arr[((k % N) + N) % N]));
+    g.lineTo(W, plotBot); g.closePath();
     g.fillStyle = COLS[b]; g.fill();
   }
   g.fillStyle = '#fff'; g.fillRect(0, plotBot, W, AXIS);
   g.textAlign = 'center';
-  for (let az = 0; az < 360; az += 5) {
-    const x = az * PXD;
-    g.fillStyle = '#333'; g.fillRect(x, plotBot, 1, az % 45 === 0 ? 8 : 4);
-    if (az % 45 === 0) { g.font = 'bold 13px sans-serif'; g.fillText(DIR8[az / 45], az === 0 ? 12 : x, plotBot + 19); }
-    else if (az % 15 === 0) { g.font = '11px sans-serif'; g.fillStyle = '#999'; g.fillText(az + '°', x, plotBot + 18); }
+  for (let az = -OFF; az <= 360 + OFF; az += 5) {
+    const x = xOf(az), a = norm360(az);
+    g.fillStyle = '#333'; g.fillRect(x, plotBot, 1, a % 45 === 0 ? 8 : 4);
+    if (a % 45 === 0) { g.font = 'bold 13px sans-serif'; g.fillText(DIR8[a / 45], x, plotBot + 19); }
+    else if (a % 15 === 0) { g.font = '11px sans-serif'; g.fillStyle = '#999'; g.fillText(a + '°', x, plotBot + 18); }
   }
   labels.forEach((l, k) => {
     const sel = k === selIdx, name = l.name.length > 7 ? l.name.slice(0, 7) : l.name, py = y(l.a);
-    g.strokeStyle = sel ? '#c0392b' : '#555'; g.lineWidth = sel ? 2 : 1;
-    g.beginPath(); g.moveTo(l.x, 8 + name.length * 14); g.lineTo(l.x, py); g.stroke();
-    g.fillStyle = sel ? '#c0392b' : '#222'; g.font = (sel ? 'bold ' : '') + '13px sans-serif';
-    for (let i = 0; i < name.length; i++) g.fillText(name[i], l.x, 18 + i * 14);
-    g.beginPath(); g.arc(l.x, py, 2.5, 0, 7); g.fill();
+    [-360, 0, 360].forEach(s => {
+      const x = xOf(l.az + s);
+      if (x < -20 || x > W + 20) return;
+      hits.push({x, k});
+      g.strokeStyle = sel ? '#c0392b' : '#555'; g.lineWidth = sel ? 2 : 1;
+      g.beginPath(); g.moveTo(x, 8 + name.length * 14); g.lineTo(x, py); g.stroke();
+      g.fillStyle = sel ? '#c0392b' : '#222'; g.font = (sel ? 'bold ' : '') + '13px sans-serif';
+      for (let i = 0; i < name.length; i++) g.fillText(name[i], x, 18 + i * 14);
+      g.beginPath(); g.arc(x, py, 2.5, 0, 7); g.fill();
+    });
   });
 }
+function scrollToAz(az) { $('panoWrap').scrollLeft = xOf(norm360(az)) - $('panoWrap').clientWidth / 2; }
 $('pano').onclick = e => {
   const x = e.clientX - $('pano').getBoundingClientRect().left;
   let best = -1, bd = 10;
-  labels.forEach((l, k) => { const dd = Math.abs(l.x - x); if (dd < bd) { bd = dd; best = k; } });
+  hits.forEach(h => { const dd = Math.abs(h.x - x); if (dd < bd) { bd = dd; best = h.k; } });
   selIdx = best; draw(); showInfo();
 };
 function showInfo() {
@@ -265,6 +289,55 @@ function showInfo() {
   $('info').textContent = `${l.name}　標高${l.h.toLocaleString()}m・${dirName(l.az)}（方位${Math.round(l.az)}°）・${(l.d / 1000).toFixed(1)}km`;
   setData('sel', [{type:'Feature', properties:{}, geometry:{type:'LineString', coordinates:[obs, l.p]}}]);
 }
+
+// ---------- スマホの向き ----------
+// 背面カメラが向いている方角（立てて持つ）。水平に近いときは上端の向き
+function headingFrom(a, b, g) {
+  const r = Math.PI / 180, cA = Math.cos(a * r), sA = Math.sin(a * r), cB = Math.cos(b * r), sB = Math.sin(b * r),
+    cG = Math.cos(g * r), sG = Math.sin(g * r);
+  let vx = -(cG * sA * sB + cA * sG), vy = -(sA * sG - cA * cG * sB);
+  const vz = -cB * cG;
+  if (Math.abs(vz) > 0.8) { vx = -cB * sA; vy = cA * cB; }
+  return norm360(Math.atan2(vx, vy) / r);
+}
+function onOri(e) {
+  let h;
+  if (e.webkitCompassHeading != null) h = e.webkitCompassHeading;
+  else if (e.alpha != null && (e.type === 'deviceorientationabsolute' || e.absolute)) h = headingFrom(e.alpha, e.beta || 0, e.gamma || 0);
+  else return;
+  gotOri = true;
+  const r = Math.PI / 180;
+  sx = sx * 0.8 + Math.sin(h * r) * 0.2; sy = sy * 0.8 + Math.cos(h * r) * 0.2;
+  head = norm360(Math.atan2(sx, sy) / r + offset);
+}
+if ('ondeviceorientationabsolute' in window) window.addEventListener('deviceorientationabsolute', onOri);
+else window.addEventListener('deviceorientation', onOri);
+function loop() {
+  if (sync && head != null) {
+    scrollToAz(head);
+    $('dirInfo').textContent = `いま向いている方向：${dirName(head)} ${Math.round(head)}°`;
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+function setSync(on) {
+  sync = on;
+  $('syncBtn').classList.toggle('on', on);
+  $('syncBtn').textContent = on ? '向きに合わせる：ON' : '向きに合わせる';
+  $('center').style.display = on ? 'block' : 'none';
+  if (!on) $('dirInfo').textContent = '';
+  if (on) setTimeout(() => { if (sync && !gotOri) { $('dirInfo').textContent = 'この端末では方位センサーが使えないようです'; } }, 1500);
+}
+$('syncBtn').onclick = () => setSync(!sync);
+['touchstart', 'mousedown', 'wheel'].forEach(ev => $('panoWrap').addEventListener(ev, () => { if (sync) setSync(false); }, {passive:true}));
+function showOffset() { $('offVal').textContent = (offset > 0 ? '+' : '') + offset + '°'; }
+function changeOffset(d) {
+  offset += d; showOffset();
+  try { localStorage.setItem('yama_offset', String(offset)); } catch (e) {}
+}
+$('offMinus').onclick = () => changeOffset(-2);
+$('offPlus').onclick = () => changeOffset(2);
+showOffset();
 
 // ---------- 実行 ----------
 async function run(p) {
@@ -279,7 +352,7 @@ async function run(p) {
     status('山の一覧を取得中…');
     allVis = await checkPeaks(await peaksP, h0);
     placeLabels(); draw();
-    if (labels[0]) $('panoWrap').scrollLeft = labels[0].x - $('panoWrap').clientWidth / 2;
+    if (labels[0] && !sync) scrollToAz(labels[0].az);
     status(`${note}見える山 ${allVis.length}座（表示 ${labels.length}座）　この地点の標高 約${Math.round(h0)}m`);
   } catch (e) { showErr('計算エラー：' + e.message); }
   finally { running = false; }
@@ -296,9 +369,7 @@ $('gpsBtn').onclick = useGps;
 $('pickBtn').onclick = () => { pick = true; status('地図上の地点をタップしてください'); };
 $('many').onchange = () => { placeLabels(); selIdx = -1; draw(); showInfo(); };
 $('eye').onchange = () => { if (obs) run(obs); };
-document.querySelectorAll('button[data-az]').forEach(b => b.onclick = () => {
-  $('panoWrap').scrollLeft = Number(b.dataset.az) * PXD - $('panoWrap').clientWidth / 2;
-});
+document.querySelectorAll('button[data-az]').forEach(b => b.onclick = () => { setSync(false); scrollToAz(Number(b.dataset.az)); });
 draw();
 useGps();
 </script>
