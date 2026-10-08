@@ -1,1 +1,306 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>山座同定</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:sans-serif;font-size:15px;background:#fafafa}
+#map{height:32vh;width:100%}
+#ctrl{padding:6px 10px}
+button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
+#eye{width:64px}
+#status{font-size:13px;color:#555;margin:3px 0}
+#err{font-size:12px;color:#c00}
+#panoWrap{overflow-x:auto;overflow-y:hidden;border-top:1px solid #ccc;border-bottom:1px solid #ccc}
+#pano{display:block}
+#info{padding:6px 10px;font-size:16px;min-height:2.2em}
+.small{color:#777;font-size:12px;padding:0 10px 8px}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="ctrl">
+  <button id="gpsBtn">現在地で計算</button><button id="pickBtn">地図で地点を選ぶ</button><br>
+  目の高さ <input id="eye" type="number" value="2" min="0" step="1">m
+  <label><input type="checkbox" id="many">小さな山も表示</label>
+  <div>
+    向き：<button data-az="0">北</button><button data-az="90">東</button><button data-az="180">南</button><button data-az="270">西</button>
+  </div>
+  <div id="status">現在地を取得中…</div>
+  <div id="err"></div>
+</div>
+<div id="panoWrap"><canvas id="pano"></canvas></div>
+<div id="info">山名をタップすると詳細が出ます</div>
+<div class="small">高さ方向は強調して描いています。標高：国土地理院 標高タイル／山名：© OpenStreetMap contributors</div>
+<script>
+const TOKEN = 'pk.eyJ1IjoiaG9yaWhha28iLCJhIjoiY211djd0ejljMDA5ZjMycHYxaTY3M3BsdSJ9.a1yefJYynC4k_YvllM5DVw';
+mapboxgl.accessToken = TOKEN;
+const $ = id => document.getElementById(id);
+const DEF = [139.38, 35.61]; // 現在地が取れないときの地点（南大沢付近）
+const R = 6371000, K = 0.13;          // 地球の半径、光の曲がり具合
+const MAXD = 150000, NEAR = 15000;    // 計算する範囲、細かい地形を使う範囲（m）
+const STEP = 0.2, PXD = 12;           // 稜線を計算する角度の刻み、横1度あたりの幅
+const BANDS = [10000, 30000, 70000, 150000];
+const COLS = ['#4a5a6e', '#6b7f9a', '#93a5bd', '#c3cfdf'];
+const DIR8 = ['北', '北東', '東', '南東', '南', '南西', '西', '北西'];
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+const TOP = 118, AXIS = 22, H = 360;
 
+const map = new mapboxgl.Map({container:'map', style:'mapbox://styles/mapbox/outdoors-v12', center:DEF, zoom:9});
+map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+
+let obs = null, obsMarker = null, pick = false, running = false, note = '';
+let prof = null, allVis = [], labels = [], selIdx = -1;
+const tiles = new Map();
+
+// ---------- 共通 ----------
+const status = t => { $('status').textContent = t; };
+const showErr = t => { $('err').textContent = t; };
+const tick = () => new Promise(r => setTimeout(r));
+function setData(id, f) { const s = map.getSource(id); if (s) s.setData({type:'FeatureCollection', features:f}); }
+function distM(a, b) {
+  const r = Math.PI / 180, dLat = (b[1] - a[1]) * r, dLon = (b[0] - a[0]) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[1] * r) * Math.cos(b[1] * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function brg(a, b) {
+  const r = Math.PI / 180, dl = (b[0] - a[0]) * r;
+  const y = Math.sin(dl) * Math.cos(b[1] * r);
+  const x = Math.cos(a[1] * r) * Math.sin(b[1] * r) - Math.sin(a[1] * r) * Math.cos(b[1] * r) * Math.cos(dl);
+  return (Math.atan2(y, x) / r + 360) % 360;
+}
+function dest(p, az, d) {
+  const r = Math.PI / 180, la1 = p[1] * r, lo1 = p[0] * r, a = az * r, dr = d / R;
+  const la2 = Math.asin(Math.sin(la1) * Math.cos(dr) + Math.cos(la1) * Math.sin(dr) * Math.cos(a));
+  const lo2 = lo1 + Math.atan2(Math.sin(a) * Math.sin(dr) * Math.cos(la1), Math.cos(dr) - Math.sin(la1) * Math.sin(la2));
+  return [lo2 / r, la2 / r];
+}
+const dirName = az => DIR8[Math.round(az / 45) % 8];
+// 見上げる角度（度）：地球の丸みと光の曲がりを考慮
+const ang = (h, d, h0) => Math.atan((h - h0 - d * d / (2 * R) * (1 - K)) / d) * 180 / Math.PI;
+function circle(c, m) {
+  const pts = [], kx = 111320 * Math.cos(c[1] * Math.PI / 180);
+  for (let i = 0; i <= 64; i++) { const a = i / 64 * 2 * Math.PI; pts.push([c[0] + m / kx * Math.sin(a), c[1] + m / 110574 * Math.cos(a)]); }
+  return {type:'Feature', properties:{}, geometry:{type:'Polygon', coordinates:[pts]}};
+}
+
+// ---------- 地図 ----------
+map.on('load', () => {
+  const empty = {type:'FeatureCollection', features:[]};
+  map.addSource('range', {type:'geojson', data:empty});
+  map.addLayer({id:'range', type:'line', source:'range', paint:{'line-color':'#1f6fd1', 'line-width':1.5, 'line-dasharray':[2, 2]}});
+  map.addSource('sel', {type:'geojson', data:empty});
+  map.addLayer({id:'sel', type:'line', source:'sel', paint:{'line-color':'#c0392b', 'line-width':3}});
+  if (obs) setData('range', [circle(obs, MAXD)]);
+});
+map.on('click', e => { if (pick) { pick = false; note = ''; run([e.lngLat.lng, e.lngLat.lat]); } });
+function placeObs() {
+  if (!obsMarker) obsMarker = new mapboxgl.Marker({color:'#1e90ff'}).setLngLat(obs).addTo(map);
+  else obsMarker.setLngLat(obs);
+  setData('range', [circle(obs, MAXD)]);
+  map.jumpTo({center:obs, zoom:10});
+}
+
+// ---------- 標高タイル（国土地理院） ----------
+const tc = document.createElement('canvas'); tc.width = tc.height = 256;
+const tcx = tc.getContext('2d', {willReadFrequently:true});
+function tileXY(lon, lat, z) {
+  const n = 2 ** z, r = lat * Math.PI / 180;
+  return [(lon + 180) / 360 * n, (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n];
+}
+async function loadTile(z, x, y) {
+  const key = z + '/' + x + '/' + y;
+  if (tiles.has(key)) return;
+  tiles.set(key, null);
+  try {
+    const r = await fetch(`https://cyberjapandata.gsi.go.jp/xyz/dem_png/${key}.png`);
+    if (!r.ok) return;
+    const bmp = await createImageBitmap(await r.blob());
+    tcx.clearRect(0, 0, 256, 256); tcx.drawImage(bmp, 0, 0);
+    const d = tcx.getImageData(0, 0, 256, 256).data, a = new Float32Array(65536);
+    for (let i = 0; i < 65536; i++) {
+      const v = d[i * 4] * 65536 + d[i * 4 + 1] * 256 + d[i * 4 + 2];
+      a[i] = v === 8388608 ? 0 : (v < 8388608 ? v : v - 16777216) * 0.01;
+    }
+    tiles.set(key, a);
+  } catch (e) {}
+}
+function tileList(c, m, z) {
+  const dLat = m / 110574, dLon = m / (111320 * Math.cos(c[1] * Math.PI / 180));
+  const [x0, y0] = tileXY(c[0] - dLon, c[1] + dLat, z), [x1, y1] = tileXY(c[0] + dLon, c[1] - dLat, z), list = [];
+  for (let x = Math.floor(x0); x <= Math.floor(x1); x++)
+    for (let y = Math.floor(y0); y <= Math.floor(y1); y++) list.push([z, x, y]);
+  return list;
+}
+async function loadAll(list) {
+  let i = 0, done = 0;
+  const worker = async () => {
+    while (i < list.length) { const t = list[i++]; await loadTile(...t); done++; status(`地形を読み込み中… ${done}/${list.length}`); }
+  };
+  await Promise.all(Array.from({length:8}, worker));
+}
+function elevZ(lon, lat, z) {
+  const [xf, yf] = tileXY(lon, lat, z), x = Math.floor(xf), y = Math.floor(yf);
+  const a = tiles.get(z + '/' + x + '/' + y);
+  if (a === undefined) return null;
+  if (!a) return 0;
+  return a[Math.min(255, Math.floor((yf - y) * 256)) * 256 + Math.min(255, Math.floor((xf - x) * 256))];
+}
+function elev(p, d) {
+  if (d < NEAR) { const h = elevZ(p[0], p[1], 12); if (h !== null) return h; }
+  return elevZ(p[0], p[1], 10) ?? 0;
+}
+
+// ---------- 稜線の計算 ----------
+async function computeProfile(h0) {
+  const N = Math.round(360 / STEP), cum = BANDS.map(() => new Float32Array(N).fill(-90));
+  for (let i = 0; i < N; i++) {
+    const az = i * STEP; let d = 30, b = 0, mx = -90;
+    while (d <= MAXD) {
+      while (b < BANDS.length && d > BANDS[b]) { cum[b][i] = mx; b++; }
+      const a = ang(elev(dest(obs, az, d), d), d, h0);
+      if (a > mx) mx = a;
+      d += Math.max(30, d * 0.008);
+    }
+    for (; b < BANDS.length; b++) cum[b][i] = mx;
+    if (i % 60 === 0) { status(`稜線を計算中… ${Math.round(i / N * 100)}%`); await tick(); }
+  }
+  return cum;
+}
+
+// ---------- 山の一覧（OpenStreetMap）と見えるかの判定 ----------
+async function fetchPeaks() {
+  const dLat = MAXD / 110574, dLon = MAXD / (111320 * Math.cos(obs[1] * Math.PI / 180));
+  const bb = [obs[1] - dLat, obs[0] - dLon, obs[1] + dLat, obs[0] + dLon].map(v => v.toFixed(4)).join(',');
+  const q = `[out:json][timeout:90];node["natural"~"^(peak|volcano)$"]["name"](${bb});out body;`;
+  for (const url of OVERPASS) {
+    try {
+      const r = await fetch(url, {method:'POST', body:'data=' + encodeURIComponent(q),
+        headers:{'Content-Type':'application/x-www-form-urlencoded'}});
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return (await r.json()).elements || [];
+    } catch (e) { showErr('山の一覧の取得に失敗（' + url.split('/')[2] + '）：' + e.message); }
+  }
+  return [];
+}
+async function checkPeaks(els, h0) {
+  const vis = [];
+  for (let k = 0; k < els.length; k++) {
+    const e = els[k], p = [e.lon, e.lat], D = distM(obs, p);
+    if (D < 200 || D > MAXD || !e.tags) continue;
+    const osmH = parseFloat(String(e.tags.ele || '').replace(/[^\d.]/g, ''));
+    const h = Math.max(isFinite(osmH) ? osmH : 0, elev(p, D));
+    const az = brg(obs, p), target = ang(h, D, h0), stop = D - Math.max(150, D * 0.015);
+    let d = 30, ok = true;
+    while (d < stop) {
+      if (ang(elev(dest(obs, az, d), d), d, h0) > target + 0.02) { ok = false; break; }
+      d += Math.max(30, d * 0.008);
+    }
+    if (ok) vis.push({name:e.tags['name:ja'] || e.tags.name, h:Math.round(h), d:D, az, a:target, p});
+    if (k % 200 === 0) { status(`見える山を判定中… ${k}/${els.length}`); await tick(); }
+  }
+  return vis;
+}
+function placeLabels() {
+  const sp = $('many').checked ? 11 : 17, W = 360 * PXD;
+  labels = [];
+  [...allVis].sort((x, y) => y.h - x.h).forEach(v => {
+    const x = v.az * PXD;
+    if (labels.some(l => { const dx = Math.abs(l.x - x); return dx < sp || dx > W - sp; })) return;
+    labels.push({...v, x});
+  });
+}
+
+// ---------- パノラマ図 ----------
+function draw() {
+  const W = Math.round(360 * PXD), c = $('pano'), dpr = Math.min(2, window.devicePixelRatio || 1);
+  c.width = W * dpr; c.height = H * dpr; c.style.width = W + 'px'; c.style.height = H + 'px';
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#d8e6f5'); sky.addColorStop(1, '#f6f9fc');
+  g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  if (!prof) return;
+  const far = prof[prof.length - 1];
+  let lo = Infinity, hi = -Infinity;
+  far.forEach(v => { if (v < lo) lo = v; if (v > hi) hi = v; });
+  labels.forEach(l => { if (l.a > hi) hi = l.a; });
+  lo -= 0.3; hi += 0.4;
+  const plotBot = H - AXIS, y = a => plotBot - (Math.max(lo, a) - lo) / (hi - lo) * (plotBot - TOP);
+  for (let b = BANDS.length - 1; b >= 0; b--) {
+    const arr = prof[b];
+    g.beginPath(); g.moveTo(0, plotBot);
+    for (let i = 0; i < arr.length; i++) g.lineTo(i * STEP * PXD, y(arr[i]));
+    g.lineTo(W, y(arr[0])); g.lineTo(W, plotBot); g.closePath();
+    g.fillStyle = COLS[b]; g.fill();
+  }
+  g.fillStyle = '#fff'; g.fillRect(0, plotBot, W, AXIS);
+  g.textAlign = 'center';
+  for (let az = 0; az < 360; az += 5) {
+    const x = az * PXD;
+    g.fillStyle = '#333'; g.fillRect(x, plotBot, 1, az % 45 === 0 ? 8 : 4);
+    if (az % 45 === 0) { g.font = 'bold 13px sans-serif'; g.fillText(DIR8[az / 45], az === 0 ? 12 : x, plotBot + 19); }
+    else if (az % 15 === 0) { g.font = '11px sans-serif'; g.fillStyle = '#999'; g.fillText(az + '°', x, plotBot + 18); }
+  }
+  labels.forEach((l, k) => {
+    const sel = k === selIdx, name = l.name.length > 7 ? l.name.slice(0, 7) : l.name, py = y(l.a);
+    g.strokeStyle = sel ? '#c0392b' : '#555'; g.lineWidth = sel ? 2 : 1;
+    g.beginPath(); g.moveTo(l.x, 8 + name.length * 14); g.lineTo(l.x, py); g.stroke();
+    g.fillStyle = sel ? '#c0392b' : '#222'; g.font = (sel ? 'bold ' : '') + '13px sans-serif';
+    for (let i = 0; i < name.length; i++) g.fillText(name[i], l.x, 18 + i * 14);
+    g.beginPath(); g.arc(l.x, py, 2.5, 0, 7); g.fill();
+  });
+}
+$('pano').onclick = e => {
+  const x = e.clientX - $('pano').getBoundingClientRect().left;
+  let best = -1, bd = 10;
+  labels.forEach((l, k) => { const dd = Math.abs(l.x - x); if (dd < bd) { bd = dd; best = k; } });
+  selIdx = best; draw(); showInfo();
+};
+function showInfo() {
+  const l = labels[selIdx];
+  if (!l) { $('info').textContent = '山名をタップすると詳細が出ます'; setData('sel', []); return; }
+  $('info').textContent = `${l.name}　標高${l.h.toLocaleString()}m・${dirName(l.az)}（方位${Math.round(l.az)}°）・${(l.d / 1000).toFixed(1)}km`;
+  setData('sel', [{type:'Feature', properties:{}, geometry:{type:'LineString', coordinates:[obs, l.p]}}]);
+}
+
+// ---------- 実行 ----------
+async function run(p) {
+  if (running) return;
+  running = true; obs = p; selIdx = -1; prof = null; labels = []; allVis = [];
+  showErr(''); draw(); showInfo(); placeObs();
+  try {
+    const peaksP = fetchPeaks();
+    await loadAll(tileList(obs, MAXD, 10).concat(tileList(obs, NEAR + 2000, 12)));
+    const h0 = elev(obs, 0) + Math.max(0, Number($('eye').value) || 0);
+    prof = await computeProfile(h0);
+    status('山の一覧を取得中…');
+    allVis = await checkPeaks(await peaksP, h0);
+    placeLabels(); draw();
+    if (labels[0]) $('panoWrap').scrollLeft = labels[0].x - $('panoWrap').clientWidth / 2;
+    status(`${note}見える山 ${allVis.length}座（表示 ${labels.length}座）　この地点の標高 約${Math.round(h0)}m`);
+  } catch (e) { showErr('計算エラー：' + e.message); }
+  finally { running = false; }
+}
+function useGps() {
+  if (!('geolocation' in navigator)) { note = '※現在地が使えないため南大沢付近で計算　'; run(DEF); return; }
+  status('現在地を取得中…');
+  navigator.geolocation.getCurrentPosition(
+    g => { note = ''; run([g.coords.longitude, g.coords.latitude]); },
+    e => { note = '※現在地が取れないため南大沢付近で計算　'; showErr('位置情報：' + e.message); run(DEF); },
+    {enableHighAccuracy:true, timeout:20000, maximumAge:60000});
+}
+$('gpsBtn').onclick = useGps;
+$('pickBtn').onclick = () => { pick = true; status('地図上の地点をタップしてください'); };
+$('many').onchange = () => { placeLabels(); selIdx = -1; draw(); showInfo(); };
+$('eye').onchange = () => { if (obs) run(obs); };
+document.querySelectorAll('button[data-az]').forEach(b => b.onclick = () => {
+  $('panoWrap').scrollLeft = Number(b.dataset.az) * PXD - $('panoWrap').clientWidth / 2;
+});
+draw();
+useGps();
+</script>
+</body>
+</html>
