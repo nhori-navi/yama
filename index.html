@@ -57,8 +57,9 @@ const R = 6371000, K = 0.13;          // 地球の半径、光の曲がり具合
 const MAXD = 150000, NEAR = 15000;    // 計算する範囲、細かい地形を使う範囲（m）
 const STEP = 0.2, PXD = 12;           // 稜線を計算する角度の刻み、横1度あたりの幅
 const OFF = 60;                       // 北をまたいでつなげるための左右の余白（度）
-const WAIT = 30000;                   // 細かい山の問い合わせを待つ上限（ミリ秒）
-const STORE = 'yama_peaks_v1', KEEP_DAYS = 30;
+const WAIT = 30000, WD_WAIT = 70000;  // 問い合わせを待つ上限（ミリ秒）
+const FETCH_KM = 250;                 // Wikidataから一度に取る半径（km）
+const STORE = 'yama_peaks_v2', KEEP_DAYS = 30;
 const WD = 'https://query.wikidata.org/sparql?format=json&query=';
 const BANDS = [10000, 30000, 70000, 150000];
 const COLS = ['#4a5a6e', '#6b7f9a', '#93a5bd', '#c3cfdf'];
@@ -71,7 +72,6 @@ map.addControl(new mapboxgl.NavigationControl(), 'top-right');
 let obs = null, obsMarker = null, pick = false, running = false, note = '', curH0 = 0, srcName = '';
 let prof = null, baseVis = [], extraVis = [], extraFor = null, allVis = [], labels = [], hits = [], selIdx = -1;
 let sync = false, head = null, sx = 0, sy = 0, gotOri = false, offset = 0;
-let peakStore = null, storeP = null;
 const tiles = new Map();
 try { offset = Number(localStorage.getItem('yama_offset')) || 0; } catch (e) {}
 
@@ -198,50 +198,58 @@ async function computeProfile(h0) {
   return cum;
 }
 
-// ---------- 全国の山の一覧（Wikidata）をスマホに保存 ----------
+// ---------- 山の一覧（Wikidata）を地域ごとにスマホへ保存 ----------
+// 保存形式：{regions:[{c:[経度,緯度], t:取得日時}], list:[[名前, 経度, 緯度, 標高, 百名山=1, ID]]}
 function loadStore() {
-  try { const s = JSON.parse(localStorage.getItem(STORE) || 'null'); if (s && Array.isArray(s.list) && s.list.length) return s; } catch (e) {}
-  return null;
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE) || 'null');
+    if (s && Array.isArray(s.list) && Array.isArray(s.regions)) return s;
+  } catch (e) {}
+  return {regions:[], list:[]};
 }
-function saveStore(list) {
-  try { localStorage.setItem(STORE, JSON.stringify({t:Date.now(), list})); } catch (e) { showErr('スマホへの保存に失敗しました（容量不足の可能性）'); }
+function saveStore(s) {
+  try { localStorage.setItem(STORE, JSON.stringify(s)); } catch (e) { showErr('スマホへの保存に失敗しました（容量不足の可能性）'); }
 }
 function showStoreInfo() {
-  $('storeInfo').textContent = peakStore
-    ? `保存済みの山：${peakStore.list.length.toLocaleString()}座（${new Date(peakStore.t).toLocaleDateString('ja-JP')}取得）`
+  const s = loadStore();
+  $('storeInfo').textContent = s.regions.length
+    ? `保存済み：${s.regions.length}地域・${s.list.length.toLocaleString()}座`
     : '山の一覧はまだ保存されていません';
 }
-async function fetchJapan() {
+// この地点の計算範囲をまるごと含む保存済み地域
+const coveringRegion = (s, p) => s.regions.find(r => distM(r.c, p) <= FETCH_KM * 1000 - MAXD);
+async function fetchRegion(center) {
   const q = `SELECT ?i ?l ?c ?e WHERE {
     VALUES ?t { wd:Q8502 wd:Q8072 wd:Q169358 wd:Q54050 }
     ?i wdt:P31 ?t; wdt:P17 wd:Q17; wdt:P625 ?c.
+    FILTER(geof:distance(?c, "Point(${center[0].toFixed(4)} ${center[1].toFixed(4)})"^^geo:wktLiteral) < ${FETCH_KM})
     OPTIONAL { ?i wdt:P2044 ?e }
     ?i rdfs:label ?l. FILTER(LANG(?l) = "ja")
   }`;
-  const r = await tfetch(WD + encodeURIComponent(q), {}, 90000);
+  const r = await tfetch(WD + encodeURIComponent(q), {}, WD_WAIT);
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const j = await r.json(), byId = new Map();
   ((j.results && j.results.bindings) || []).forEach(b => {
     const m = /Point\(([-\d.]+) ([-\d.]+)\)/.exec(b.c.value);
     if (!m) return;
-    const e = b.e ? Math.round(parseFloat(b.e.value)) : 0, old = byId.get(b.i.value);
+    const id = b.i.value.replace(/.*\//, ''), e = b.e ? Math.round(parseFloat(b.e.value)) : 0, old = byId.get(id);
     if (old) { if (e > old[3]) old[3] = e; return; }
-    byId.set(b.i.value, [b.l.value, +(+m[1]).toFixed(4), +(+m[2]).toFixed(4), isFinite(e) ? e : 0, 0]);
+    byId.set(id, [b.l.value, +(+m[1]).toFixed(4), +(+m[2]).toFixed(4), isFinite(e) ? e : 0, 0, id]);
   });
   try { // 日本百名山の印
     const q2 = `SELECT ?i WHERE { ?h rdfs:label "日本百名山"@ja. ?i wdt:P361 ?h. }`;
-    const r2 = await tfetch(WD + encodeURIComponent(q2), {}, 30000);
-    if (r2.ok) ((await r2.json()).results.bindings || []).forEach(b => { const v = byId.get(b.i.value); if (v) v[4] = 1; });
+    const r2 = await tfetch(WD + encodeURIComponent(q2), {}, WAIT);
+    if (r2.ok) ((await r2.json()).results.bindings || []).forEach(b => {
+      const v = byId.get(b.i.value.replace(/.*\//, '')); if (v) v[4] = 1;
+    });
   } catch (e) {}
-  if (!byId.size) throw new Error('一覧が空でした');
-  return [...byId.values()];
-}
-function getJapan() {
-  if (peakStore) return Promise.resolve(peakStore.list);
-  if (!storeP) storeP = fetchJapan().then(list => {
-    saveStore(list); peakStore = {t:Date.now(), list}; showStoreInfo(); return list;
-  }).finally(() => { storeP = null; });
-  return storeP;
+  if (!byId.size) throw new Error('この地域の山が見つかりませんでした');
+  const s = loadStore(), all = new Map(s.list.map(v => [v[5], v]));
+  byId.forEach((v, id) => all.set(id, v));
+  s.list = [...all.values()];
+  s.regions = s.regions.filter(x => distM(x.c, center) > 1000).concat([{c:center, t:Date.now()}]);
+  saveStore(s); showStoreInfo();
+  return s;
 }
 function nearList(list) {
   const dLat = MAXD / 110574 + 0.01, dLon = MAXD / (111320 * Math.cos(obs[1] * Math.PI / 180)) + 0.01;
@@ -271,10 +279,10 @@ async function addExtra() {
       const p = [e.lon, e.lat], n = e.tags && (e.tags['name:ja'] || e.tags.name);
       return !base.some((b, i) => { const d = distM(b, p); return d < 150 || (baseNames[i] === n && d < 3000); });
     });
-    extraVis = (await checkPeaks(fresh, curH0)).map(v => ({...v, extra:true}));
+    extraVis = await checkPeaks(fresh, curH0);
     extraFor = key;
     refreshLabels(); doneStatus();
-  } catch (e) { showErr('細かい山の取得に失敗：' + errText(e, WAIT) + '（少し待ってチェックを入れ直してください）'); doneStatus(); }
+  } catch (e) { showErr('細かい山の取得に失敗：OpenStreetMap ' + errText(e, WAIT) + '（少し待ってチェックを入れ直してください）'); doneStatus(); }
 }
 
 // ---------- 見えるかの判定 ----------
@@ -427,21 +435,32 @@ async function run(p) {
   if (running) return;
   running = true; obs = p; selIdx = -1; prof = null; labels = []; allVis = []; baseVis = []; extraVis = []; extraFor = null;
   showErr(''); draw(); showInfo(); placeObs();
+  const errs = [];
+  let staleRegion = null;
   try {
-    const listP = getJapan().catch(e => { showErr('全国の山の一覧を取得できませんでした：' + errText(e, 90000)); return null; });
+    const st = loadStore(), reg = coveringRegion(st, obs);
+    let listP;
+    if (reg) {
+      listP = Promise.resolve(st.list);
+      if (Date.now() - reg.t > KEEP_DAYS * 86400000) staleRegion = reg;
+    } else {
+      const center = [+obs[0].toFixed(2), +obs[1].toFixed(2)];
+      listP = fetchRegion(center).then(s => s.list).catch(e => { errs.push('Wikidata：' + errText(e, WD_WAIT)); return null; });
+    }
     await loadAll(tileList(obs, MAXD, 10).concat(tileList(obs, NEAR + 2000, 12)));
     curH0 = elev(obs, 0) + Math.max(0, Number($('eye').value) || 0);
     prof = await computeProfile(curH0);
     draw(); // 山並みを先に表示
-    status(peakStore ? '山名を判定中…' : '全国の山の一覧を初回取得中…（初回のみ数十秒）');
+    status(reg ? '山名を判定中…' : 'この地域の山の一覧を取得中…（初回のみ、最大70秒ほど）');
     const list = await listP;
     let els;
     if (list) { els = nearList(list); srcName = 'スマホに保存した一覧'; }
     else {
-      status('周辺の山名を問い合わせ中…（最大30秒）');
+      status('予備として周辺の山名を問い合わせ中…（最大30秒）');
       try { els = await fromOsm(); srcName = 'OpenStreetMap'; }
-      catch (e) { els = []; srcName = 'なし'; showErr('山名を取得できませんでした：' + errText(e, WAIT) + '（少し待って「現在地で計算」を押し直してください）'); }
+      catch (e) { els = []; srcName = 'なし'; errs.push('OpenStreetMap：' + errText(e, WAIT)); }
     }
+    if (errs.length) showErr((list || els.length ? '' : '山名を取得できませんでした。少し待って「現在地で計算」を押し直してください　') + errs.join(' ／ '));
     baseVis = await checkPeaks(els, curH0);
     refreshLabels();
     if (labels[0] && !sync) scrollToAz(labels[0].az);
@@ -449,9 +468,7 @@ async function run(p) {
   } catch (e) { showErr('計算エラー：' + e.message); }
   finally { running = false; }
   if ($('many').checked) addExtra();
-  if (peakStore && Date.now() - peakStore.t > KEEP_DAYS * 86400000) {
-    fetchJapan().then(list => { saveStore(list); peakStore = {t:Date.now(), list}; showStoreInfo(); }).catch(() => {});
-  }
+  if (staleRegion) fetchRegion(staleRegion.c).catch(() => {});
 }
 function useGps() {
   if (!('geolocation' in navigator)) { note = '※現在地が使えないため南大沢付近で計算　'; run(DEF); return; }
@@ -466,15 +483,14 @@ $('pickBtn').onclick = () => { pick = true; status('地図上の地点をタッ�
 $('many').onchange = () => { refreshLabels(); doneStatus(); if ($('many').checked && !running) addExtra(); };
 $('eye').onchange = () => { if (obs) run(obs); };
 $('refreshBtn').onclick = () => {
-  if (running || storeP) return;
-  if (!confirm('全国の山の一覧を取り直します（数十秒かかります）。よろしいですか？')) return;
-  peakStore = null;
-  try { localStorage.removeItem(STORE); } catch (e) {}
+  if (running) return;
+  if (!confirm('保存した山の一覧を消して、取り直します。よろしいですか？')) return;
+  try { localStorage.removeItem(STORE); localStorage.removeItem('yama_peaks_v1'); } catch (e) {}
   showStoreInfo();
-  if (obs) run(obs); else getJapan().catch(e => showErr('取得に失敗：' + errText(e, 90000)));
+  if (obs) run(obs);
 };
 document.querySelectorAll('button[data-az]').forEach(b => b.onclick = () => { setSync(false); scrollToAz(Number(b.dataset.az)); });
-peakStore = loadStore();
+try { localStorage.removeItem('yama_peaks_v1'); } catch (e) {} // 前の版の保存データは使わないので消す
 showStoreInfo();
 draw();
 useGps();
