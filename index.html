@@ -63,10 +63,11 @@ const STORE = 'yama_peaks_v2', KEEP_DAYS = 30;
 const WD = 'https://query.wikidata.org/sparql?format=json&query=';
 // 細かい山（OpenStreetMap）：縦横1度のマスごとに取ってスマホへ保存
 const OSM_STORE = 'yama_osm_v1', OSM_DAYS = 90, OSM_MAX = 40;
+const OSM_RETRY = 3, OSM_PAUSE = 30; // 3か所とも失敗したとき、30秒待ってやり直す回数
 const MIRRORS = [ // 上から順に試す
-  {name:'private.coffee', url:'https://overpass.private.coffee/api/interpreter'},
   {name:'本家', url:'https://overpass-api.de/api/interpreter'},
-  {name:'VK Maps', url:'https://maps.mail.ru/osm/tools/overpass/api/interpreter'}
+  {name:'VK Maps', url:'https://maps.mail.ru/osm/tools/overpass/api/interpreter'},
+  {name:'private.coffee', url:'https://overpass.private.coffee/api/interpreter'}
 ];
 const BANDS = [10000, 30000, 70000, 150000];
 const COLS = ['#4a5a6e', '#6b7f9a', '#93a5bd', '#c3cfdf'];
@@ -87,6 +88,7 @@ try { offset = Number(localStorage.getItem('yama_offset')) || 0; } catch (e) {}
 const status = t => { $('status').textContent = t; };
 const showErr = t => { $('err').textContent = t; };
 const tick = () => new Promise(r => setTimeout(r));
+const sleep = s => new Promise(r => setTimeout(r, s * 1000));
 const norm360 = a => ((a % 360) + 360) % 360;
 const xOf = az => (az + OFF) * PXD;
 const obsKey = () => obs ? obs[0].toFixed(4) + ',' + obs[1].toFixed(4) : '';
@@ -361,11 +363,23 @@ async function osmPeaks(key, label) {
   const list = osmKeys(obs), now = Date.now(), old = t => !t || now - t.t > OSM_DAYS * 86400000;
   let c = loadOsm(), lastErr = '';
   const need = list.filter(m => old(c.tiles[m.k]));
-  for (let i = 0; i < need.length; i++) {
-    if (key !== obsKey()) return null;
-    status(`${label}を取得中… ${i + 1}/${need.length}マス（初回のみ。混んでいるときは時間がかかります）`);
-    try { saveTile(need[i].k, {t:Date.now(), l:await fetchTile(need[i].x, need[i].y)}); }
-    catch (e) { lastErr = e.message; break; } // 3か所ともだめなら、今回はここまで
+  tiles: for (let i = 0; i < need.length; i++) {
+    for (let round = 0; ; round++) {
+      if (key !== obsKey()) return null;
+      status(`${label}を取得中… ${i + 1}/${need.length}マス（初回のみ。混んでいるときは時間がかかります）`);
+      try {
+        saveTile(need[i].k, {t:Date.now(), l:await fetchTile(need[i].x, need[i].y)});
+        lastErr = ''; await sleep(1); break; // サーバーに負担をかけないよう1秒あけて次のマスへ
+      } catch (e) {
+        lastErr = e.message;
+        if (round >= OSM_RETRY) break tiles; // やり直しても無理なら、今回はここまで（次回は続きから）
+        for (let s = OSM_PAUSE; s > 0; s--) { // 30秒待ってやり直す
+          if (key !== obsKey()) return null;
+          status(`${label}：取得先が混んでいます。${s}秒後にやり直します（${round + 1}/${OSM_RETRY}回目）　${i}/${need.length}マス取得済み`);
+          await sleep(1);
+        }
+      }
+    }
   }
   if (key !== obsKey()) return null;
   c = loadOsm(); showStoreInfo();
@@ -390,7 +404,7 @@ async function addExtra() {
     if (key !== obsKey()) return;
     extraVis = vis; extraFor = key; extraDone = res.done;
     refreshLabels(); doneStatus();
-    if (res.lastErr) showErr(`細かい山：${res.missing ? `${res.total}マス中${res.missing}マスを取得できませんでした` : '古い保存データで表示しています'}（${res.lastErr}）。少し待ってチェックを入れ直すと、足りない分だけ取り直します`);
+    if (res.lastErr) showErr(`細かい山：${res.missing ? `${res.total}マス中${res.missing}マスを取得できませんでした` : '古い保存データで表示しています'}（${res.lastErr}）。チェックを入れ直すか、次に計算したときに、足りない分だけ続きから取ります`);
   } catch (e) { showErr('細かい山の表示に失敗：' + e.message); doneStatus(); }
   finally {
     extraBusy = false;
