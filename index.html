@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
 <style>
 *{box-sizing:border-box}
 body{margin:0;font-family:sans-serif;font-size:15px;background:#fafafa}
@@ -24,6 +25,14 @@ button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
 #info{padding:6px 10px;font-size:16px;min-height:2.2em}
 .small{color:#777;font-size:12px;padding:0 10px 8px}
 #refreshBtn{font-size:12px;padding:3px 8px}
+#astroCtrl button{padding:5px 7px}
+#dIn{width:9.5em;padding:4px}
+#astro{font-size:13px;color:#a0522d;margin:3px 0}
+#info button{font-size:13px;padding:4px 8px;margin:4px 0 0}
+#hits{padding:0 10px 6px;font-size:14px}
+#hits .hit{padding:5px 0;border-bottom:1px dotted #ccc;cursor:pointer}
+#hits .hit:active{background:#fdebd0}
+#hits .head{color:#555;font-size:13px;margin:4px 0}
 </style>
 </head>
 <body>
@@ -39,15 +48,22 @@ button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
   <div>
     向き：<button data-az="0">北</button><button data-az="90">東</button><button data-az="180">南</button><button data-az="270">西</button>
   </div>
+  <div id="astroCtrl">
+    <label><input type="checkbox" id="astroOn" checked>太陽と月</label>
+    <button id="dPrev">◀</button><input type="date" id="dIn"><button id="dNext">▶</button><button id="dToday">今日</button>
+  </div>
+  <div id="astro"></div>
   <div id="dirInfo"></div>
   <div id="status">現在地を取得中…</div>
   <div id="err"></div>
 </div>
 <div id="panoBox"><div id="panoWrap"><canvas id="pano"></canvas></div><div id="center"></div></div>
 <div id="info">山名をタップすると詳細が出ます</div>
+<div id="hits"></div>
 <div class="small">スマホは写真を撮るときのように立てて持ってください。方角がずれるときは補正ボタンで合わせます。高さ方向は強調して描いています。茶色の山名は日本百名山です。<br>
+オレンジの線は太陽、黄色の線は月の通り道です（点は10分ごと、点線は山の陰）。日の出・日の入りは、山並みから出る・山並みに隠れる時刻です。時刻は数分ずれることがあります。<br>
 <span id="storeInfo"></span> <button id="refreshBtn">山の一覧を取り直す</button><br>
-標高：国土地理院 標高タイル／山名：Wikidata、© OpenStreetMap contributors</div>
+標高：国土地理院 標高タイル／山名：Wikidata、© OpenStreetMap contributors／天体計算：Astronomy Engine</div>
 <script>
 const TOKEN = 'pk.eyJ1IjoiaG9yaWhha28iLCJhIjoiY211djd0ejljMDA5ZjMycHYxaTY3M3BsdSJ9.a1yefJYynC4k_YvllM5DVw';
 mapboxgl.accessToken = TOKEN;
@@ -451,11 +467,195 @@ function placeLabels() {
 }
 function refreshLabels() {
   allVis = baseVis.concat($('many').checked ? extraVis : []);
-  placeLabels(); selIdx = -1; draw(); showInfo();
+  placeLabels(); selIdx = -1; draw(); showInfo(); showAstro();
 }
 function doneStatus() {
   const extra = $('many').checked && extraFor === obsKey() ? `＋細かい山 ${extraVis.length}座` : '';
   status(`${note}見える山 ${baseVis.length}座${extra}（表示 ${labels.length}座）　山名：${srcName}　この地点の標高 約${Math.round(curH0)}m`);
+}
+
+// ---------- 太陽と月 ----------
+const AST = window.Astronomy || null;  // 天体計算の部品（読み込めなかったときは null）
+const SUN_R = 0.267, MOON_R = 0.26;    // 見かけの半径（度）
+const HIT_DEG = 0.4;                   // 山頂に重なったとみなす横のずれ（度）
+const WEEK = '日月火水木金土';
+let astroDate = null, astroCache = null, searchId = 0;
+const pad2 = n => String(n).padStart(2, '0');
+const dateStr = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const hm = d => `${d.getHours()}:${pad2(d.getMinutes())}`;
+const mdw = d => `${d.getMonth() + 1}月${d.getDate()}日（${WEEK[d.getDay()]}）`;
+const norm180 = a => ((a % 360) + 540) % 360 - 180;
+const today0 = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
+const astroOn = () => !!AST && $('astroOn').checked;
+const observer = () => new AST.Observer(obs[1], obs[0], curH0);
+// 太陽・月の方位と高さ（大気による光の曲がりを含む見かけの高さ）
+function bodyPos(body, t, ob) {
+  const e = AST.Equator(body, new Date(t), ob, true, true), h = AST.Horizon(new Date(t), ob, e.ra, e.dec, 'normal');
+  return {az:h.azimuth, alt:h.altitude};
+}
+// その方位の山並みの高さ（いちばん遠い山まで含めた見かけの角度）
+function ridgeAt(az) {
+  const far = prof[prof.length - 1], N = far.length, f = norm360(az) / STEP, i = Math.floor(f) % N, w = f - Math.floor(f);
+  return far[i] * (1 - w) + far[(i + 1) % N] * w;
+}
+// t0〜t1 の間で g(t) の正負が入れかわる時刻を、半分ずつ絞り込んで探す
+function bisect(g, t0, t1, n) {
+  let g0 = g(t0);
+  for (let k = 0; k < n; k++) {
+    const tm = (t0 + t1) / 2, gm = g(tm);
+    if ((gm > 0) === (g0 > 0)) { t0 = tm; g0 = gm; } else t1 = tm;
+  }
+  return (t0 + t1) / 2;
+}
+// 選んだ日の太陽・月の通り道と、山並みから出る・隠れる時刻（地点・日付ごとに1回だけ計算）
+function astroDay() {
+  if (!AST || !prof || !obs || !astroDate) return null;
+  const key = obsKey() + '|' + dateStr(astroDate) + '|' + Math.round(curH0);
+  if (astroCache && astroCache.key === key) return astroCache;
+  const ob = observer(), t0 = astroDate.getTime(), res = {key};
+  [['sun', AST.Body.Sun, SUN_R], ['moon', AST.Body.Moon, MOON_R]].forEach(([k, body, rad]) => {
+    const pts = [];
+    for (let m = 0; m <= 1440; m += 2) { const t = t0 + m * 60000; pts.push({t, ...bodyPos(body, t, ob)}); }
+    // 上の縁が山並みより上なら「見えている」
+    const gv = p => p.alt + rad - ridgeAt(p.az), g = t => gv(bodyPos(body, t, ob));
+    let rise = null, set = null;
+    for (let i = 1; i < pts.length; i++) {
+      const ga = gv(pts[i - 1]), gb = gv(pts[i]);
+      if (ga <= 0 && gb > 0 && rise === null) rise = bisect(g, pts[i - 1].t, pts[i].t, 10);
+      if (ga > 0 && gb <= 0) set = bisect(g, pts[i - 1].t, pts[i].t, 10);
+    }
+    const ev = t => t === null ? null : {t, ...bodyPos(body, t, ob)};
+    res[k] = {pts, rise:ev(rise), set:ev(set)};
+  });
+  const noon = new Date(t0 + 12 * 3600000);
+  res.age = AST.MoonPhase(noon) / 360 * 29.53;  // 月齢（おおよそ）
+  astroCache = res;
+  return res;
+}
+// その方位の近くにある、見えている山の名前
+function nearPeak(az) {
+  let best = null, bd = 1.5;
+  allVis.forEach(v => { const d = Math.abs(norm180(v.az - az)); if (d < bd) { bd = d; best = v; } });
+  return best ? `（${best.name}付近）` : '';
+}
+function showAstro() {
+  const el = $('astro');
+  if (!AST) { el.textContent = '太陽と月：計算用の部品を読み込めませんでした（電波のよい所で開き直してください）'; return; }
+  if (!astroOn() || !prof) { el.textContent = ''; return; }
+  const r = astroDay(); if (!r) return;
+  const ev = (e, w) => `${w} ${e ? hm(new Date(e.t)) + nearPeak(e.az) : 'なし'}`;
+  el.textContent = `${mdw(astroDate)}　☀${ev(r.sun.rise, '日の出')}・${ev(r.sun.set, '日の入り')}　☾${ev(r.moon.rise, '月の出')}・${ev(r.moon.set, '月の入り')}・月齢${r.age.toFixed(1)}`;
+}
+function setAstroDate(d) {
+  astroDate = d; $('dIn').value = dateStr(d);
+  draw(); showAstro();
+}
+// パノラマに太陽・月の通り道を描く
+function drawAstro(g, yRaw, W, plotBot, lo, hi) {
+  const r = astroDay(); if (!r) return;
+  g.save();
+  g.beginPath(); g.rect(0, TOP - 6, W, plotBot - TOP + 6); g.clip();
+  const t0 = astroDate.getTime();
+  [['moon', '#b8960c', r.moon], ['sun', '#e67e22', r.sun]].forEach(([k, col, b]) => {
+    const pts = b.pts;
+    [-360, 0, 360].forEach(s => {
+      for (let i = 1; i < pts.length; i++) {
+        const p = pts[i - 1], q = pts[i];
+        if (Math.abs(q.az - p.az) > 180) continue;                       // 北をまたぐところはつながない
+        if ((p.alt < lo - 1 && q.alt < lo - 1) || (p.alt > hi + 1 && q.alt > hi + 1)) continue;
+        const x1 = xOf(p.az + s), x2 = xOf(q.az + s);
+        if (Math.max(x1, x2) < 0 || Math.min(x1, x2) > W) continue;
+        const vis = (p.alt + q.alt) / 2 > ridgeAt((p.az + q.az) / 2);
+        g.strokeStyle = col; g.globalAlpha = vis ? 1 : 0.45; g.lineWidth = vis ? 2 : 1; g.setLineDash(vis ? [] : [3, 3]);
+        g.beginPath(); g.moveTo(x1, yRaw(p.alt)); g.lineTo(x2, yRaw(q.alt)); g.stroke();
+      }
+      g.setLineDash([]); g.globalAlpha = 1; g.fillStyle = col; g.textAlign = 'left';
+      pts.forEach(p => { // 10分ごとの点、20分ごとの時刻
+        const m = Math.round((p.t - t0) / 60000);
+        if (m % 10) return;
+        const x = xOf(p.az + s), y = yRaw(p.alt);
+        if (x < -20 || x > W + 20 || y < TOP - 6 || y > plotBot) return;
+        g.beginPath(); g.arc(x, y, 2, 0, 7); g.fill();
+        if (m % 20 === 0) { g.font = '10px sans-serif'; g.fillText(hm(new Date(p.t)), x + 4, y - 4); }
+      });
+      [b.rise, b.set].forEach(e => { // 山並みから出る・隠れる位置
+        if (!e) return;
+        const x = xOf(e.az + s), y = yRaw(e.alt);
+        if (x < -20 || x > W + 20) return;
+        g.strokeStyle = col; g.lineWidth = 2;
+        g.beginPath(); g.arc(x, y, 5, 0, 7); g.stroke();
+        g.font = 'bold 12px sans-serif'; g.fillText(hm(new Date(e.t)), x + 7, y + 14);
+      });
+    });
+  });
+  if (dateStr(astroDate) === dateStr(new Date())) { // いまの位置
+    const ob = observer(), now = Date.now();
+    [['☾', '#b8960c', AST.Body.Moon], ['☀', '#e67e22', AST.Body.Sun]].forEach(([mark, col, body]) => {
+      const p = bodyPos(body, now, ob), y = yRaw(p.alt);
+      if (y < TOP - 6 || y > plotBot) return;
+      [-360, 0, 360].forEach(s => {
+        const x = xOf(p.az + s);
+        if (x < -20 || x > W + 20) return;
+        g.fillStyle = col; g.strokeStyle = '#fff'; g.lineWidth = 2;
+        g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill(); g.stroke();
+        g.font = 'bold 11px sans-serif'; g.fillText('いま', x + 8, y - 6);
+      });
+    });
+  }
+  g.restore();
+}
+// この山の山頂に、太陽・月が重なる日をこの先1年分さがす
+async function searchHits(l) {
+  const id = ++searchId, key = obsKey(), box = $('hits');
+  const ob = observer(), start = today0().getTime(), hits = [];
+  let near = null; // 太陽がいちばん近づく日（重ならないとき用）
+  const bodies = [['太陽', AST.Body.Sun], ['月', AST.Body.Moon]];
+  for (let day = 0; day < 366; day++) {
+    if (id !== searchId || key !== obsKey()) return;
+    if (day % 8 === 0) { box.textContent = `${l.name}に太陽・月が重なる日を探しています… ${Math.round(day / 366 * 100)}%`; await tick(); }
+    const t0 = start + day * 86400000;
+    for (const [bn, body] of bodies) {
+      const g = t => bodyPos(body, t, ob).alt - l.a; // 中心が山頂の高さに来たか
+      let tp = t0, gp = g(tp);
+      for (let m = 30; m <= 1440; m += 30) {
+        const t = t0 + m * 60000, gt = g(t);
+        if ((gp > 0) !== (gt > 0)) {
+          const tc = bisect(g, tp, t, 12), off = norm180(bodyPos(body, tc, ob).az - l.az);
+          if (bn === '太陽' && (!near || Math.abs(off) < Math.abs(near.off))) near = {t:tc, off};
+          if (Math.abs(off) <= HIT_DEG) {
+            const h = {bn, t:tc, rising:gt > gp, off};
+            if (bn === '月') {
+              h.illum = AST.Illumination(AST.Body.Moon, new Date(tc)).phase_fraction;
+              h.bright = bodyPos(AST.Body.Sun, tc, ob).alt > -4; // 空が明るい時間
+            }
+            hits.push(h);
+          }
+        }
+        tp = t; gp = gt;
+      }
+    }
+  }
+  if (id !== searchId) return;
+  box.innerHTML = '';
+  const head = document.createElement('div'); head.className = 'head';
+  if (hits.length) head.textContent = `${l.name}の山頂に重なる日（この先1年）。タップするとその日の通り道を表示します`;
+  else {
+    head.textContent = `この先1年で、太陽・月が${l.name}の山頂に重なる日は見つかりませんでした。`;
+    if (near && Math.abs(near.off) < 3) head.textContent += `太陽がいちばん近づくのは${mdw(new Date(near.t))} ${hm(new Date(near.t))}（山頂の${near.off > 0 ? '右' : '左'}${Math.abs(near.off).toFixed(1)}°）です。`;
+    else head.textContent += 'この山の方角には、一年を通して太陽が昇り沈みしません。';
+  }
+  box.appendChild(head);
+  hits.forEach(h => {
+    const d = new Date(h.t), row = document.createElement('div'); row.className = 'hit';
+    const io = h.rising ? '出' : '入り';
+    const kind = h.bn === '太陽' ? `☀ ダイヤモンド（日の${io}）` : `☾ ${h.illum >= 0.9 ? 'パール' : '月'}（月の${io}）`;
+    const off = Math.abs(h.off) < 0.1 ? 'ほぼ山頂' : `山頂の${h.off > 0 ? '右' : '左'}${Math.abs(h.off).toFixed(1)}°`;
+    let note = '';
+    if (h.bn === '月') note = `・月の明るさ${Math.round(h.illum * 100)}%` + (h.illum < 0.1 ? '（新月前後で見えません）' : '') + (h.bright ? '・空が明るい時間' : '');
+    row.textContent = `${d.getFullYear()}年${mdw(d)} ${hm(d)}　${kind}　${off}${note}`;
+    row.onclick = () => { setSync(false); setAstroDate(new Date(d.getFullYear(), d.getMonth(), d.getDate())); scrollToAz(l.az); };
+    box.appendChild(row);
+  });
 }
 
 // ---------- パノラマ図 ----------
@@ -472,7 +672,7 @@ function draw() {
   far.forEach(v => { if (v < lo) lo = v; if (v > hi) hi = v; });
   labels.forEach(l => { if (l.a > hi) hi = l.a; });
   lo -= 0.3; hi += 0.4;
-  const plotBot = H - AXIS, y = a => plotBot - (Math.max(lo, a) - lo) / (hi - lo) * (plotBot - TOP);
+  const plotBot = H - AXIS, yRaw = a => plotBot - (a - lo) / (hi - lo) * (plotBot - TOP), y = a => yRaw(Math.max(lo, a));
   for (let b = BANDS.length - 1; b >= 0; b--) {
     const arr = prof[b];
     g.beginPath(); g.moveTo(0, plotBot);
@@ -488,6 +688,8 @@ function draw() {
     if (a % 45 === 0) { g.font = 'bold 13px sans-serif'; g.fillText(DIR8[a / 45], x, plotBot + 19); }
     else if (a % 15 === 0) { g.font = '11px sans-serif'; g.fillStyle = '#999'; g.fillText(a + '°', x, plotBot + 18); }
   }
+  if (astroOn()) { try { drawAstro(g, yRaw, W, plotBot, lo, hi); } catch (e) { showErr('太陽と月の計算エラー：' + e.message); } }
+  g.textAlign = 'center';
   labels.forEach((l, k) => {
     const sel = k === selIdx, name = l.name.length > 7 ? l.name.slice(0, 7) : l.name, py = y(l.a);
     const col = sel ? '#c0392b' : (l.f100 ? '#8b4513' : '#222');
@@ -508,12 +710,19 @@ $('pano').onclick = e => {
   const x = e.clientX - $('pano').getBoundingClientRect().left;
   let best = -1, bd = 10;
   hits.forEach(h => { const dd = Math.abs(h.x - x); if (dd < bd) { bd = dd; best = h.k; } });
+  if (best !== selIdx) { searchId++; $('hits').textContent = ''; } // 別の山を選んだら探した結果を消す
   selIdx = best; draw(); showInfo();
 };
 function showInfo() {
   const l = labels[selIdx];
   if (!l) { $('info').textContent = '山名をタップすると詳細が出ます'; setData('sel', []); return; }
   $('info').textContent = `${l.name}${l.f100 ? '（日本百名山）' : ''}　標高${l.h.toLocaleString()}m・${dirName(l.az)}（方位${Math.round(l.az)}°）・${(l.d / 1000).toFixed(1)}km`;
+  if (AST) {
+    const b = document.createElement('button');
+    b.textContent = '☀☾ この山に太陽・月が重なる日を探す';
+    b.onclick = () => searchHits(l);
+    $('info').appendChild(document.createElement('br')); $('info').appendChild(b);
+  }
   setData('sel', [{type:'Feature', properties:{}, geometry:{type:'LineString', coordinates:[obs, l.p]}}]);
 }
 
@@ -570,6 +779,7 @@ showOffset();
 async function run(p) {
   if (running) return;
   running = true; obs = p; selIdx = -1; prof = null; labels = []; allVis = []; baseVis = []; extraVis = []; extraFor = null; extraDone = false;
+  searchId++; $('hits').textContent = ''; $('astro').textContent = '';
   showErr(''); draw(); showInfo(); placeObs();
   const errs = [];
   let staleRegion = null;
@@ -586,7 +796,7 @@ async function run(p) {
     await loadAll(tileList(obs, MAXD, 10).concat(tileList(obs, NEAR + 2000, 12)));
     curH0 = elev(obs, 0) + Math.max(0, Number($('eye').value) || 0);
     prof = await computeProfile(curH0);
-    draw(); // 山並みを先に表示
+    draw(); showAstro(); // 山並み（と太陽・月）を先に表示
     status(reg ? '山名を判定中…' : 'この地域の山の一覧を取得中…（初回のみ、最大70秒ほど）');
     const list = await listP;
     let els;
@@ -630,6 +840,23 @@ $('refreshBtn').onclick = () => {
   if (obs) run(obs);
 };
 document.querySelectorAll('button[data-az]').forEach(b => b.onclick = () => { setSync(false); scrollToAz(Number(b.dataset.az)); });
+// 太陽と月の日付
+const shiftDay = n => setAstroDate(new Date(astroDate.getFullYear(), astroDate.getMonth(), astroDate.getDate() + n));
+$('dPrev').onclick = () => shiftDay(-1);
+$('dNext').onclick = () => shiftDay(1);
+$('dToday').onclick = () => setAstroDate(today0());
+$('dIn').onchange = () => {
+  const v = $('dIn').value.split('-').map(Number);
+  if (v.length === 3 && v[0]) setAstroDate(new Date(v[0], v[1] - 1, v[2]));
+};
+try { if (localStorage.getItem('yama_astro') === '0') $('astroOn').checked = false; } catch (e) {}
+$('astroOn').onchange = () => {
+  try { localStorage.setItem('yama_astro', $('astroOn').checked ? '1' : '0'); } catch (e) {}
+  draw(); showAstro();
+};
+astroDate = today0(); $('dIn').value = dateStr(astroDate);
+// 今日を表示しているときは、1分ごとに「いま」の位置を描き直す
+setInterval(() => { if (astroOn() && prof && dateStr(astroDate) === dateStr(new Date())) draw(); }, 60000);
 try { localStorage.removeItem('yama_peaks_v1'); } catch (e) {} // 前の版の保存データは使わないので消す
 showStoreInfo();
 draw();
