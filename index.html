@@ -33,6 +33,23 @@ button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
 #hits .hit{padding:5px 0;border-bottom:1px dotted #ccc;cursor:pointer}
 #hits .hit:active{background:#fdebd0}
 #hits .head{color:#555;font-size:13px;margin:4px 0}
+#aim{font-size:14px;font-weight:bold;color:#b8860b;min-height:1.2em}
+#toast{display:none;position:absolute;top:6px;left:50%;transform:translateX(-50%);background:#d4a017;color:#fff;font-weight:bold;
+  padding:6px 14px;border-radius:16px;font-size:15px;white-space:nowrap;pointer-events:none;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+#zk{display:none;position:fixed;inset:0;background:#fff;overflow-y:auto;z-index:10;padding:10px 12px 30px}
+#zk .top{display:flex;justify-content:space-between;align-items:center}
+#zk h2{font-size:18px;margin:4px 0}
+#zk h3{font-size:16px;margin:16px 0 4px;color:#8b4513}
+#zkSum{font-size:14px;line-height:1.6;margin:6px 0;color:#333}
+#zk .sort button{font-size:13px;padding:3px 8px}
+#zk .sort button.on{background:#8b4513;color:#fff;border:1px solid #8b4513;border-radius:4px}
+#zkList .row{padding:6px 0;border-bottom:1px dotted #ccc}
+#zkList .nm{font-weight:bold;font-size:16px}
+#zkList .nm.f{color:#8b4513}
+#zkList .sub{font-size:12px;color:#666}
+#zkF100 span{display:inline-block;margin:2px 8px 2px 0;font-size:13px;color:#bbb}
+#zkF100 span.got{color:#8b4513;font-weight:bold}
+#zkNote{font-size:12px;color:#888}
 </style>
 </head>
 <body>
@@ -44,6 +61,7 @@ button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
   <div>
     <button id="syncBtn">向きに合わせる</button>
     補正 <button id="offMinus">−2°</button><span id="offVal">0°</span><button id="offPlus">＋2°</button>
+    <button id="zkBtn">📖 図鑑</button>
   </div>
   <div>
     向き：<button data-az="0">北</button><button data-az="90">東</button><button data-az="180">南</button><button data-az="270">西</button>
@@ -54,16 +72,27 @@ button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
   </div>
   <div id="astro"></div>
   <div id="dirInfo"></div>
+  <div id="aim"></div>
   <div id="status">現在地を取得中…</div>
   <div id="err"></div>
 </div>
-<div id="panoBox"><div id="panoWrap"><canvas id="pano"></canvas></div><div id="center"></div></div>
+<div id="panoBox"><div id="panoWrap"><canvas id="pano"></canvas></div><div id="center"></div><div id="toast"></div></div>
 <div id="info">山名をタップすると詳細が出ます</div>
 <div id="hits"></div>
 <div class="small">スマホは写真を撮るときのように立てて持ってください。方角がずれるときは補正ボタンで合わせます。高さ方向は強調して描いています。茶色の山名は日本百名山です。<br>
+「向きに合わせる」をONにして山名を赤い線に2秒合わせると、図鑑に記録されます（名前の右上の金色の点は見つけた山）。<br>
 オレンジの線は太陽、黄色の線は月の通り道です（点は10分ごと、点線は山の陰）。日の出・日の入りは、山並みから出る・山並みに隠れる時刻です。時刻は数分ずれることがあります。<br>
 <span id="storeInfo"></span> <button id="refreshBtn">山の一覧を取り直す</button><br>
 標高：国土地理院 標高タイル／山名：Wikidata、© OpenStreetMap contributors／天体計算：Astronomy Engine</div>
+<div id="zk">
+  <div class="top"><h2>📖 山の図鑑</h2><button id="zkClose">閉じる</button></div>
+  <div id="zkSum"></div>
+  <div class="sort">並べ替え：<button data-s="new">新しい順</button><button data-s="far">遠い順</button><button data-s="high">高い順</button></div>
+  <div id="zkList"></div>
+  <h3>日本百名山スタンプ帳</h3>
+  <div id="zkF100"></div>
+  <div id="zkNote"></div>
+</div>
 <script>
 const TOKEN = 'pk.eyJ1IjoiaG9yaWhha28iLCJhIjoiY211djd0ejljMDA5ZjMycHYxaTY3M3BsdSJ9.a1yefJYynC4k_YvllM5DVw';
 mapboxgl.accessToken = TOKEN;
@@ -658,6 +687,125 @@ async function searchHits(l) {
   });
 }
 
+// ---------- 山の図鑑 ----------
+// 保存形式：{peaks:{キー:{n:名前, h:標高, f:百名山=1, id:WikidataのID, p:[経度,緯度], t1:初めて見つけた日時, t2:最後に見つけた日時,
+//   c:見つけた回数, from:[経度,緯度]（初めて見つけた場所）, place:市区町村名, d:初めて見つけた距離m, dm:いちばん遠くから見つけた距離m}}}
+const ZK_STORE = 'yama_zukan_v1', F100_STORE = 'yama_f100_v1';
+const CATCH_DEG = 2, CATCH_MS = 2000; // 赤い線の±2°以内に2秒で「見つけた」
+const GOLD = '#d4a017';
+let zukan = loadZukan(), aim = null, flashK = '', flashUntil = 0, toastTimer = 0, zkSort = 'new', f100 = null, f100Err = '';
+const caughtNow = new Set(); // 今回の起動中に、同じ場所で見つけた山（何度も数えないため）
+function loadZukan() {
+  try { const z = JSON.parse(localStorage.getItem(ZK_STORE) || 'null'); if (z && z.peaks) return z; } catch (e) {}
+  return {peaks:{}};
+}
+function saveZukan() {
+  try { localStorage.setItem(ZK_STORE, JSON.stringify(zukan)); } catch (e) { showErr('図鑑の保存に失敗しました（容量不足の可能性）'); }
+}
+const zkKey = l => l.id || ('osm:' + l.name + ':' + l.p[0].toFixed(3) + ',' + l.p[1].toFixed(3));
+function toast(t) {
+  const el = $('toast'); el.textContent = t; el.style.display = 'block';
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.style.display = 'none'; }, 2800);
+}
+// 見つけた場所の市区町村名（Mapboxで調べる。取れなくても記録は残す）
+async function placeName(p, k) {
+  try {
+    const r = await tfetch(`https://api.mapbox.com/search/geocode/v6/reverse?longitude=${p[0]}&latitude=${p[1]}&types=place&language=ja&access_token=${TOKEN}`, {}, 10000);
+    if (!r.ok) return;
+    const f = ((await r.json()).features || [])[0], pr = f && f.properties;
+    const name = pr && (pr.name_preferred || pr.name);
+    if (name && zukan.peaks[k] && !zukan.peaks[k].place) { zukan.peaks[k].place = name; saveZukan(); }
+  } catch (e) {}
+}
+function catchPeak(l) {
+  const k = zkKey(l), sk = obsKey() + '|' + k, now = Date.now();
+  flashK = k; flashUntil = now + 2000; setTimeout(draw, 2100);
+  if (caughtNow.has(sk)) { toast(`${l.name}（記録済み）`); draw(); return; }
+  caughtNow.add(sk);
+  const e = zukan.peaks[k], dist = Math.round(l.d);
+  if (!e) {
+    zukan.peaks[k] = {n:l.name, h:l.h, f:l.f100 ? 1 : 0, id:l.id || '', p:l.p, t1:now, t2:now, c:1, from:[+obs[0].toFixed(4), +obs[1].toFixed(4)], d:dist, dm:dist};
+    placeName(obs, k);
+  } else { e.t2 = now; e.c++; if (dist > e.dm) e.dm = dist; if (l.f100) e.f = 1; }
+  saveZukan();
+  if (navigator.vibrate) navigator.vibrate(e ? 60 : [80, 60, 120]);
+  const nF = Object.values(zukan.peaks).filter(v => v.f).length;
+  toast(e ? `見つけた！ ${l.name}（${e.c}回目）` : `はじめて見つけた！ ${l.name}` + (l.f100 ? `　百名山 ${nF}座目` : ''));
+  draw();
+}
+// 毎フレーム：赤い線の近くに山があるかを見て、2秒保ったら「見つけた」
+function checkAim(now) {
+  let best = null;
+  if (sync && head != null && gotOri && !running && labels.length) {
+    let bd = CATCH_DEG;
+    labels.forEach(l => { const d = Math.abs(norm180(l.az - head)); if (d <= bd) { bd = d; best = l; } });
+  }
+  if (!best) { if (aim) { aim = null; $('aim').textContent = ''; $('center').style.background = '#c0392b'; } return; }
+  const k = zkKey(best);
+  if (!aim || aim.k !== k) aim = {k, since:now, done:false};
+  $('center').style.background = GOLD;
+  if (aim.done) { $('aim').textContent = `✓ ${best.name}`; return; }
+  const el = now - aim.since, n = Math.min(5, Math.floor(el / CATCH_MS * 5));
+  $('aim').textContent = `🎯 ${best.name}　${'●'.repeat(n)}${'○'.repeat(5 - n)}`;
+  if (el >= CATCH_MS) { aim.done = true; catchPeak(best); }
+}
+// 日本百名山の一覧（名前と緯度。北から順に並べる）。90日保存
+async function f100List() {
+  try {
+    const c = JSON.parse(localStorage.getItem(F100_STORE) || 'null');
+    if (c && Array.isArray(c.list) && Date.now() - c.t < 90 * 86400000) return c.list;
+  } catch (e) {}
+  const q = `SELECT ?i ?l ?c WHERE { ?h rdfs:label "日本百名山"@ja. ?i wdt:P361 ?h.
+    OPTIONAL { ?i rdfs:label ?l. FILTER(LANG(?l) = "ja") } OPTIONAL { ?i wdt:P625 ?c } }`;
+  const r = await tfetch(WD + encodeURIComponent(q), {}, WAIT);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const m = new Map();
+  ((await readWd(r)).results.bindings || []).forEach(b => {
+    const id = b.i.value.replace(/.*\//, ''), lat = /Point\([-\d.]+ ([-\d.]+)\)/.exec(b.c ? b.c.value : '');
+    if (!m.has(id)) m.set(id, [id, b.l ? b.l.value : id, lat ? +(+lat[1]).toFixed(3) : 0]);
+  });
+  const list = [...m.values()].sort((a, b) => b[2] - a[2]);
+  if (list.length < 50) throw new Error('一覧が足りません');
+  try { localStorage.setItem(F100_STORE, JSON.stringify({t:Date.now(), list})); } catch (e) {}
+  return list;
+}
+const ymdhm = t => { const d = new Date(t); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${hm(d)}`; };
+const km = m => (m / 1000).toFixed(1) + 'km';
+function renderZukan() {
+  const all = Object.values(zukan.peaks), got = new Set(all.map(v => v.id).filter(Boolean));
+  const div = (cls, txt) => { const e = document.createElement('div'); e.className = cls; e.textContent = txt; return e; };
+  // まとめ
+  const nF = f100 ? f100.filter(v => got.has(v[0])).length : all.filter(v => v.f).length;
+  const far = all.reduce((a, v) => (!a || v.dm > a.dm ? v : a), null), high = all.reduce((a, v) => (!a || v.h > a.h ? v : a), null);
+  $('zkSum').textContent = all.length
+    ? `見つけた山 ${all.length}座　百名山 ${nF}／${f100 ? f100.length : 100}\nいちばん遠く：${far.n}（${km(far.dm)}）\nいちばん高い：${high.n}（${high.h.toLocaleString()}m）`
+    : 'まだ見つけた山はありません。「向きに合わせる」をONにして、山名を赤い線に2秒合わせると見つけられます。';
+  $('zkSum').style.whiteSpace = 'pre-line';
+  // 一覧
+  document.querySelectorAll('#zk .sort button').forEach(b => b.classList.toggle('on', b.dataset.s === zkSort));
+  const sorted = all.slice().sort((a, b) => zkSort === 'far' ? b.dm - a.dm : zkSort === 'high' ? b.h - a.h : b.t2 - a.t2);
+  const box = $('zkList'); box.innerHTML = '';
+  sorted.forEach(v => {
+    const row = div('row', '');
+    row.appendChild(div('nm' + (v.f ? ' f' : ''), v.n + (v.f ? '（百名山）' : '')));
+    row.appendChild(div('sub', `標高${v.h.toLocaleString()}m・見つけた回数 ${v.c}回・いちばん遠くから ${km(v.dm)}`));
+    row.appendChild(div('sub', `初めて：${ymdhm(v.t1)}${v.place ? '　' + v.place + 'から' : ''}（${km(v.d)}）`));
+    box.appendChild(row);
+  });
+  // 百名山スタンプ帳
+  const fb = $('zkF100'); fb.innerHTML = '';
+  if (f100) f100.forEach(v => { const s = document.createElement('span'); s.textContent = (got.has(v[0]) ? '✓' : '') + v[1]; if (got.has(v[0])) s.className = 'got'; fb.appendChild(s); });
+  else fb.textContent = f100Err || '百名山の一覧を読み込み中…';
+  $('zkNote').textContent = f100 && f100.length !== 100 ? `※Wikidataでは${f100.length}項目あります（1座に2つの頂上が登録されているものがあるため）。北から順に並べています。` : (f100 ? '北から順に並べています。' : '');
+}
+async function openZukan() {
+  $('zk').style.display = 'block'; renderZukan();
+  if (!f100) {
+    try { f100 = await f100List(); f100Err = ''; } catch (e) { f100Err = '百名山の一覧を読み込めませんでした（' + errText(e, WAIT) + '）。開き直すと再度読み込みます'; }
+    renderZukan();
+  }
+}
+
 // ---------- パノラマ図 ----------
 function draw() {
   const W = Math.round((360 + OFF * 2) * PXD), c = $('pano'), dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -690,18 +838,22 @@ function draw() {
   }
   if (astroOn()) { try { drawAstro(g, yRaw, W, plotBot, lo, hi); } catch (e) { showErr('太陽と月の計算エラー：' + e.message); } }
   g.textAlign = 'center';
+  const now = Date.now();
   labels.forEach((l, k) => {
     const sel = k === selIdx, name = l.name.length > 7 ? l.name.slice(0, 7) : l.name, py = y(l.a);
-    const col = sel ? '#c0392b' : (l.f100 ? '#8b4513' : '#222');
+    const zk = zkKey(l), flash = zk === flashK && now < flashUntil, got = !!zukan.peaks[zk];
+    const col = flash ? GOLD : sel ? '#c0392b' : (l.f100 ? '#8b4513' : '#222');
     [-360, 0, 360].forEach(s => {
       const x = xOf(l.az + s);
       if (x < -20 || x > W + 20) return;
       hits.push({x, k});
-      g.strokeStyle = sel ? '#c0392b' : (l.f100 ? '#8b4513' : '#555'); g.lineWidth = sel || l.f100 ? 2 : 1;
+      g.strokeStyle = flash ? GOLD : sel ? '#c0392b' : (l.f100 ? '#8b4513' : '#555'); g.lineWidth = flash ? 3 : sel || l.f100 ? 2 : 1;
       g.beginPath(); g.moveTo(x, 8 + name.length * 14); g.lineTo(x, py); g.stroke();
-      g.fillStyle = col; g.font = (sel || l.f100 ? 'bold ' : '') + '13px sans-serif';
+      g.fillStyle = col; g.font = (flash || sel || l.f100 ? 'bold ' : '') + '13px sans-serif';
       for (let i = 0; i < name.length; i++) g.fillText(name[i], x, 18 + i * 14);
       g.beginPath(); g.arc(x, py, l.f100 ? 3.5 : 2.5, 0, 7); g.fill();
+      if (got) { g.fillStyle = GOLD; g.beginPath(); g.arc(x + 9, 7, 3, 0, 7); g.fill(); } // 見つけた山の印
+      if (flash) { g.strokeStyle = GOLD; g.lineWidth = 2; g.beginPath(); g.arc(x, py, 9, 0, 7); g.stroke(); }
     });
   });
 }
@@ -748,11 +900,12 @@ function onOri(e) {
 }
 if ('ondeviceorientationabsolute' in window) window.addEventListener('deviceorientationabsolute', onOri);
 else window.addEventListener('deviceorientation', onOri);
-function loop() {
+function loop(now) {
   if (sync && head != null) {
     scrollToAz(head);
     $('dirInfo').textContent = `いま向いている方向：${dirName(head)} ${Math.round(head)}°`;
   }
+  checkAim(now || performance.now());
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
@@ -855,6 +1008,10 @@ $('astroOn').onchange = () => {
   draw(); showAstro();
 };
 astroDate = today0(); $('dIn').value = dateStr(astroDate);
+// 図鑑
+$('zkBtn').onclick = openZukan;
+$('zkClose').onclick = () => { $('zk').style.display = 'none'; };
+document.querySelectorAll('#zk .sort button').forEach(b => b.onclick = () => { zkSort = b.dataset.s; renderZukan(); });
 // 今日を表示しているときは、1分ごとに「いま」の位置を描き直す
 setInterval(() => { if (astroOn() && prof && dateStr(astroDate) === dateStr(new Date())) draw(); }, 60000);
 try { localStorage.removeItem('yama_peaks_v1'); } catch (e) {} // 前の版の保存データは使わないので消す
