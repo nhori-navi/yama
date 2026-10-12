@@ -67,6 +67,7 @@ function toast(t, ms) {
 // 計算している地点の市区町村名（場所スタンプ用。Mapboxで調べる）
 async function updatePlace() {
   const key = obsKey();
+  if (lowAcc) { curPlace = ''; placeFor = ''; return; } // 現在地の精度が粗いときは、違う町のスタンプにならないよう調べない
   if (!obs || placeFor === key) return;
   placeFor = key; curPlace = '';
   try {
