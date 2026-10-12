@@ -79,15 +79,15 @@ async function ensureQuests() {
     let st = loadJson(WX_STORE, {});
     if (here) st = await Promise.race([ensureWx([here]), sleep(8)]) || st; // 天気は8秒まで待つ
     const day = todayStr(), r = seeded(day + '|' + (obs ? obs[0].toFixed(1) + ',' + obs[1].toFixed(1) : ''));
-    const bad = badToday(st, here);
+    const bad = badToday(st, here), home = bad || !sensorOk(); // 向きセンサーのない端末も、家でできるお題だけ
     let cand = [];
     QUESTS.forEach(q => { try { const o = q.make(r); if (o) cand.push({k:q.k, home:q.home, ...o, done:0}); } catch (e) {} });
-    if (bad) cand = cand.filter(q => q.home);
+    if (home) cand = cand.filter(q => q.home);
     for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [cand[i], cand[j]] = [cand[j], cand[i]]; }
     const out = [];
     cand.forEach(q => { if (out.length < 3 && (q.home || out.filter(x => !x.home).length < 2)) out.push(q); }); // 見つけるお題は2つまで
     if (quest.day === day && quest.list) return; // 作っている間にほかで作られていたら何もしない
-    quest.day = day; quest.list = out; quest.bad = bad; quest.bonus = 0; quest.caught = [];
+    quest.day = day; quest.list = out; quest.bad = bad; quest.pc = !sensorOk(); quest.bonus = 0; quest.caught = [];
     saveQuest(); qLabel();
     if ($('td').style.display === 'block') renderQuest();
   })().finally(() => { qMaking = null; });
@@ -168,6 +168,7 @@ function renderQuest() {
   const box = $('qBox'); box.innerHTML = '';
   if (quest.day !== todayStr() || !quest.list) { box.appendChild(mkEl('div', 'note', '今日のお題を用意しています…（「現在地で計算」が終わると出ます）')); return; }
   if (quest.bad) box.appendChild(mkEl('div', 'note', '☔ 今日は山が見えにくい予報なので、家でもできるお題にしました'));
+  else if (quest.pc) box.appendChild(mkEl('div', 'note', '💻 この端末には向きセンサーがないので、家でもできるお題にしました'));
   quest.list.forEach(q => box.appendChild(mkEl('div', 'q' + (q.done ? ' done' : ''), `${q.done ? '✅' : '⬜'} ${q.txt}　${q.done ? '達成 ' + hm(new Date(q.done)) : '+' + Q_PTS + '点'}`)));
   const n = quest.list.filter(q => q.done).length;
   box.appendChild(mkEl('div', 'note', `${n}/${quest.list.length} 達成${quest.bonus ? '（3つ全部達成！）' : `　3つ全部で ボーナス+${Q_BONUS}点`}　連続 ${streakNow()}日（最高 ${quest.best}日）`));
