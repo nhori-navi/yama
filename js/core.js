@@ -2,7 +2,7 @@
 const TOKEN = 'pk.eyJ1IjoiaG9yaWhha28iLCJhIjoiY211djd0ejljMDA5ZjMycHYxaTY3M3BsdSJ9.a1yefJYynC4k_YvllM5DVw';
 mapboxgl.accessToken = TOKEN;
 const $ = id => document.getElementById(id);
-const DEF = [139.38, 35.61]; // 現在地が取れないときの地点（南大沢付近）
+const JAPAN = [137.5, 37.0];  // 現在地が分からないときに見せる地図の中心（日本全体）
 const R = 6371000, K = 0.13;          // 地球の半径、光の曲がり具合
 const MAXD = 150000, NEAR = 15000;    // 計算する範囲、細かい地形を使う範囲（m）
 const STEP = 0.2, PXD = 12;           // 稜線を計算する角度の刻み、横1度あたりの幅
@@ -24,13 +24,18 @@ const COLS = ['#4a5a6e', '#6b7f9a', '#93a5bd', '#c3cfdf'];
 const DIR8 = ['北', '北東', '東', '南東', '南', '南西', '西', '北西'];
 const TOP = 118, AXIS = 22, H = 360;
 
-const map = new mapboxgl.Map({container:'map', style:'mapbox://styles/mapbox/outdoors-v12', center:DEF, zoom:9});
+const map = new mapboxgl.Map({container:'map', style:'mapbox://styles/mapbox/outdoors-v12', center:JAPAN, zoom:4.3});
 map.addControl(new mapboxgl.NavigationControl(), 'top-right');
 
 let obs = null, obsMarker = null, pick = false, running = false, note = '', curH0 = 0, srcName = '';
 let prof = null, baseVis = [], extraVis = [], extraFor = null, extraDone = false, extraBusy = false, osmPref = 0;
 let allVis = [], labels = [], hits = [], selIdx = -1;
 let sync = false, head = null, sx = 0, sy = 0, gotOri = false, offset = 0;
+let lowAcc = false; // 現在地の精度が粗い（誤差1km超）ときは true（場所スタンプを付けない）
+// パソコンなど（指で操作しない端末）には向きセンサーがない。一度でも向きが届けば使える端末とみなす
+const PC_LIKE = !(window.matchMedia && matchMedia('(pointer: coarse)').matches);
+const sensorOk = () => gotOri || !PC_LIKE;
+const PHONE_ONLY = 'はスマホ専用の機能です（パソコンなど向きセンサーのない端末では使えません）';
 const tiles = new Map();
 try { offset = Number(localStorage.getItem('yama_offset')) || 0; } catch (e) {}
 
