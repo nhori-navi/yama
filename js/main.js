@@ -53,6 +53,7 @@ function draw() {
 }
 function scrollToAz(az) { $('panoWrap').scrollLeft = xOf(norm360(az)) - $('panoWrap').clientWidth / 2; }
 $('pano').onclick = e => {
+  if (panMoved) { panMoved = false; return; } // マウスで動かしたあとは選ばない
   if (skyOn() && skyTap(e)) return; // 星空で星座・星をタップしたとき（stars.js）
   const x = e.clientX - $('pano').getBoundingClientRect().left;
   let best = -1, bd = 10;
@@ -118,6 +119,7 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 function setSync(on) {
+  if (on && !sensorOk()) { toast('「向きに合わせる」' + PHONE_ONLY, 4000); return; }
   if (on) askOri(); // iPhone では、ここで向きセンサーの許可を求める
   sync = on;
   $('syncBtn').classList.toggle('on', on);
@@ -128,6 +130,19 @@ function setSync(on) {
 }
 $('syncBtn').onclick = () => setSync(!sync);
 ['touchstart', 'mousedown', 'wheel'].forEach(ev => $('panoWrap').addEventListener(ev, () => { if (sync) setSync(false); }, {passive:true}));
+// パソコン：パノラマをマウスでつかんで左右に動かす・ホイールで左右に動かす
+let panDrag = null, panMoved = false;
+$('panoWrap').addEventListener('pointerdown', e => { if (e.pointerType === 'mouse' && e.button === 0) { panDrag = {x:e.clientX, s:$('panoWrap').scrollLeft}; panMoved = false; } });
+window.addEventListener('pointermove', e => {
+  if (!panDrag) return;
+  const dx = e.clientX - panDrag.x;
+  if (Math.abs(dx) > 4) panMoved = true;
+  if (panMoved) { $('panoWrap').scrollLeft = panDrag.s - dx; $('panoWrap').style.cursor = 'grabbing'; }
+});
+window.addEventListener('pointerup', () => { panDrag = null; $('panoWrap').style.cursor = ''; });
+$('panoWrap').addEventListener('wheel', e => {
+  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { $('panoWrap').scrollLeft += e.deltaY; e.preventDefault(); }
+}, {passive:false});
 function showOffset() { $('offVal').textContent = (offset > 0 ? '+' : '') + offset + '°'; }
 function changeOffset(d) {
   offset += d; showOffset();
@@ -141,6 +156,7 @@ showOffset();
 async function run(p, opt = {}) { // opt：{gps:GPSで取った, acc:GPSの誤差m, preview:予習で選んだ山}
   if (running) return;
   summitBefore(opt);
+  lowAcc = !!(opt.gps && opt.acc > 1000);
   running = true; obs = p; selIdx = -1; prof = null; labels = []; allVis = []; baseVis = []; extraVis = []; extraFor = null; extraDone = false;
   searchId++; $('hits').textContent = ''; $('astro').textContent = '';
   showErr(''); draw(); showInfo(); placeObs();
@@ -187,12 +203,23 @@ async function run(p, opt = {}) { // opt：{gps:GPSで取った, acc:GPSの誤�
   (staleRegion ? fetchRegion(staleRegion.c).catch(() => {}) : Promise.resolve()).then(retryF100)
     .then(() => loadLists()).then(() => { checkBadges(); }).catch(() => {});
 }
+// 現在地が分からないときは、地図を日本全体にして、場所を選んでもらう
+function askPick(why) {
+  pick = true;
+  map.jumpTo({center:JAPAN, zoom:4.3});
+  status(`${why}地図をタップして、山を見たい場所を選んでください`);
+}
 function useGps() {
-  if (!('geolocation' in navigator)) { note = '※現在地が使えないため南大沢付近で計算　'; run(DEF); return; }
+  if (!('geolocation' in navigator)) { askPick('この端末では現在地が使えません。'); return; }
   status('現在地を取得中…');
   navigator.geolocation.getCurrentPosition(
-    g => { note = ''; run([g.coords.longitude, g.coords.latitude], {gps:true, acc:g.coords.accuracy}); },
-    e => { note = '※現在地が取れないため南大沢付近で計算　'; showErr('位置情報：' + e.message); run(DEF); },
+    g => {
+      const acc = g.coords.accuracy;
+      // パソコンなどは Wi-Fi やインターネットの接続先から推定するので、数km以上ずれることがある
+      note = acc > 1000 ? `※現在地の精度が粗いため（誤差 約${(acc / 1000).toFixed(acc < 10000 ? 1 : 0)}km）、場所がずれているかもしれません。「地図で地点を選ぶ」が正確です　` : '';
+      run([g.coords.longitude, g.coords.latitude], {gps:true, acc});
+    },
+    e => { askPick(e.code === 1 ? '位置情報の使用が許可されていません。' : '現在地を取得できませんでした（' + e.message + '）。'); },
     {enableHighAccuracy:true, timeout:20000, maximumAge:60000});
 }
 $('gpsBtn').onclick = useGps;
