@@ -121,8 +121,9 @@ $('offPlus').onclick = () => changeOffset(2);
 showOffset();
 
 // ---------- 実行 ----------
-async function run(p) {
+async function run(p, opt = {}) { // opt：{gps:GPSで取った, acc:GPSの誤差m, preview:予習で選んだ山}
   if (running) return;
+  summitBefore(opt);
   running = true; obs = p; selIdx = -1; prof = null; labels = []; allVis = []; baseVis = []; extraVis = []; extraFor = null; extraDone = false;
   searchId++; $('hits').textContent = ''; $('astro').textContent = '';
   showErr(''); draw(); showInfo(); placeObs();
@@ -140,7 +141,8 @@ async function run(p) {
       listP = fetchRegion(center).then(s => s.list).catch(e => { errs.push('Wikidata：' + errText(e, WD_WAIT)); return null; });
     }
     await loadAll(tileList(obs, MAXD, 10).concat(tileList(obs, NEAR + 2000, 12)));
-    curH0 = elev(obs, 0) + Math.max(0, Number($('eye').value) || 0);
+    // 予習では、地形データの高さが山頂より低く出ることがあるので、一覧の標高と高いほうを使う
+    curH0 = Math.max(elev(obs, 0), opt.preview ? opt.preview.h || 0 : 0) + Math.max(0, Number($('eye').value) || 0);
     prof = await computeProfile(curH0);
     draw(); showAstro(); // 山並み（と太陽・月）を先に表示
     status(reg ? '山名を判定中…' : 'この地域の山の一覧を取得中…（初回のみ、最大70秒ほど）');
@@ -160,6 +162,7 @@ async function run(p) {
     refreshLabels();
     if (labels[0] && !sync) scrollToAz(labels[0].az);
     doneStatus();
+    summitAfter(opt); // 山頂にいるかの確認と、ここから見える名山
   } catch (e) { showErr('計算エラー：' + e.message); }
   finally { running = false; }
   if ($('many').checked) addExtra();
@@ -171,21 +174,21 @@ function useGps() {
   if (!('geolocation' in navigator)) { note = '※現在地が使えないため南大沢付近で計算　'; run(DEF); return; }
   status('現在地を取得中…');
   navigator.geolocation.getCurrentPosition(
-    g => { note = ''; run([g.coords.longitude, g.coords.latitude]); },
+    g => { note = ''; run([g.coords.longitude, g.coords.latitude], {gps:true, acc:g.coords.accuracy}); },
     e => { note = '※現在地が取れないため南大沢付近で計算　'; showErr('位置情報：' + e.message); run(DEF); },
     {enableHighAccuracy:true, timeout:20000, maximumAge:60000});
 }
 $('gpsBtn').onclick = useGps;
 $('pickBtn').onclick = () => { pick = true; status('地図上の地点をタップしてください'); };
 $('many').onchange = () => { refreshLabels(); doneStatus(); if ($('many').checked && !running) addExtra(); };
-$('eye').onchange = () => { if (obs) run(obs); };
+$('eye').onchange = () => { if (obs) run(obs, runOpt); };
 $('refreshBtn').onclick = () => {
   if (running) return;
   if (!confirm('保存した山の一覧（細かい山も含む）を消して、取り直します。よろしいですか？')) return;
   try { [STORE, OSM_STORE, LIST_STORE, 'yama_peaks_v1'].forEach(k => localStorage.removeItem(k)); } catch (e) {} // 図鑑の記録は消さない
   lists = null;
   showStoreInfo();
-  if (obs) run(obs);
+  if (obs) run(obs, runOpt);
 };
 document.querySelectorAll('button[data-az]').forEach(b => b.onclick = () => { setSync(false); scrollToAz(Number(b.dataset.az)); });
 // 太陽と月の日付
@@ -203,6 +206,8 @@ $('astroOn').onchange = () => {
   draw(); showAstro();
 };
 astroDate = today0(); $('dIn').value = dateStr(astroDate);
+// 展望の予習：山名で探す（入力が止まって0.3秒後に探す）
+$('peakQ').oninput = () => { clearTimeout(peakTimer); peakTimer = setTimeout(onPeakInput, 300); };
 // 図鑑
 $('zkBtn').onclick = openZukan;
 $('zkClose').onclick = () => { $('zk').style.display = 'none'; };
