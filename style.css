@@ -52,3 +52,12 @@ button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
 .wk img{width:84px;height:84px;object-fit:cover;border-radius:6px;flex:none;background:#eee}
 .wk .src{font-size:11px;color:#888;margin-top:2px}
 .wk a{color:#1f6fd1}
+#peakQ{width:min(100%,22em);margin-top:4px}
+#peakList .pk{display:block;width:100%;text-align:left;font-size:14px;margin:3px 0;background:#fff;border:1px solid #ccc;border-radius:4px}
+#peakList .note{font-size:12px;color:#888;margin:3px 0}
+#previewBar{display:none;margin:4px 0;padding:6px 8px;background:#eef4fb;border:1px solid #b9d0ea;border-radius:6px;font-size:14px;color:#1f4f82}
+#previewBar button{font-size:13px;padding:3px 8px}
+#viewBox{font-size:13px;color:#333;margin:3px 0}
+#viewBox .top{font-weight:bold;color:#2e7d32}
+#viewBox summary{cursor:pointer;color:#8b4513}
+#viewBox .sub{font-size:12px;color:#666;margin:2px 0 2px 1em}
