@@ -1,6 +1,7 @@
 // YamaMiru：パノラマの描画・操作・計算の実行・起動（いちばん最後に読み込む）
 // ---------- パノラマ図 ----------
 function draw() {
+  if (skyOn()) { hits = []; drawSky(); return; } // 星空の表示（stars.js）
   const W = Math.round((360 + OFF * 2) * PXD), c = $('pano'), dpr = Math.min(2, window.devicePixelRatio || 1);
   c.width = W * dpr; c.height = H * dpr; c.style.width = W + 'px'; c.style.height = H + 'px';
   const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -52,6 +53,7 @@ function draw() {
 }
 function scrollToAz(az) { $('panoWrap').scrollLeft = xOf(norm360(az)) - $('panoWrap').clientWidth / 2; }
 $('pano').onclick = e => {
+  if (skyOn() && skyTap(e)) return; // 星空で星座・星をタップしたとき（stars.js）
   const x = e.clientX - $('pano').getBoundingClientRect().left;
   let best = -1, bd = 10;
   hits.forEach(h => { const dd = Math.abs(h.x - x); if (dd < bd) { bd = dd; best = h.k; } });
