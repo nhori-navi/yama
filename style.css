@@ -1,0 +1,54 @@
+/* YamaMiru：見た目 */
+*{box-sizing:border-box}
+body{margin:0;font-family:sans-serif;font-size:15px;background:#fafafa}
+#map{height:30vh;width:100%}
+#ctrl{padding:6px 10px}
+button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
+#eye{width:64px}
+#syncBtn.on{background:#c0392b;color:#fff;border:1px solid #c0392b;border-radius:4px}
+#dirInfo{font-size:15px;font-weight:bold;color:#c0392b;min-height:1.3em}
+#status{font-size:13px;color:#555;margin:3px 0}
+#err{font-size:12px;color:#c00}
+#panoBox{position:relative}
+#panoWrap{overflow-x:auto;overflow-y:hidden;border-top:1px solid #ccc;border-bottom:1px solid #ccc}
+#pano{display:block}
+#center{display:none;position:absolute;top:0;bottom:22px;left:50%;width:2px;margin-left:-1px;background:#c0392b;pointer-events:none}
+#info{padding:6px 10px;font-size:16px;min-height:2.2em}
+.small{color:#777;font-size:12px;padding:0 10px 8px}
+#refreshBtn{font-size:12px;padding:3px 8px}
+#astroCtrl button{padding:5px 7px}
+#dIn{width:9.5em;padding:4px}
+#astro{font-size:13px;color:#a0522d;margin:3px 0}
+#info button{font-size:13px;padding:4px 8px;margin:4px 0 0}
+#hits{padding:0 10px 6px;font-size:14px}
+#hits .hit{padding:5px 0;border-bottom:1px dotted #ccc;cursor:pointer}
+#hits .hit:active{background:#fdebd0}
+#hits .head{color:#555;font-size:13px;margin:4px 0}
+#aim{font-size:14px;font-weight:bold;color:#b8860b;min-height:1.2em}
+#toast{display:none;position:absolute;top:6px;left:50%;transform:translateX(-50%);background:#d4a017;color:#fff;font-weight:bold;
+  padding:6px 14px;border-radius:16px;font-size:15px;max-width:92%;width:max-content;text-align:center;pointer-events:none;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+#zk{display:none;position:fixed;inset:0;background:#fff;overflow-y:auto;z-index:10;padding:10px 12px 30px}
+#zk .top{display:flex;justify-content:space-between;align-items:center}
+#zk h2{font-size:18px;margin:4px 0}
+#zk h3{font-size:16px;margin:16px 0 4px;color:#8b4513}
+#zkSum{font-size:14px;line-height:1.6;margin:6px 0;color:#333}
+#zk .sort button{font-size:13px;padding:3px 8px}
+#zk .sort button.on{background:#8b4513;color:#fff;border:1px solid #8b4513;border-radius:4px}
+#zkList .row{padding:6px 0;border-bottom:1px dotted #ccc}
+#zkList .nm{font-weight:bold;font-size:16px}
+#zkList .nm.f{color:#8b4513}
+#zkList .sub{font-size:12px;color:#666}
+#zkF100 span{display:inline-block;margin:2px 8px 2px 0;font-size:13px;color:#bbb}
+#zkF100 span.got{color:#8b4513;font-weight:bold}
+#zkNote{font-size:12px;color:#888}
+#zkTabs button{font-size:13px;padding:3px 8px}
+#zkTabs button.on{background:#8b4513;color:#fff;border:1px solid #8b4513;border-radius:4px}
+#zkBadges span{display:inline-block;vertical-align:top;margin:3px 6px 3px 0;padding:4px 9px;border-radius:10px;font-size:12px;
+  background:#f0f0f0;color:#aaa;white-space:pre-line;line-height:1.4}
+#zkBadges span.got{background:#fbe7b0;color:#7a5200;font-weight:bold}
+#zkList .row{cursor:pointer}
+.wkbox{font-size:13px;color:#666;margin-top:6px}
+.wk{display:flex;gap:8px;line-height:1.55;color:#333;font-size:13px}
+.wk img{width:84px;height:84px;object-fit:cover;border-radius:6px;flex:none;background:#eee}
+.wk .src{font-size:11px;color:#888;margin-top:2px}
+.wk a{color:#1f6fd1}
