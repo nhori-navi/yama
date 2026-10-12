@@ -24,6 +24,7 @@ function checkSummit(opt) {
   if (!opt.gps || !obs) return;
   const s = nearestSummit(obs);
   if (!s) return;
+  if (!(opt.acc <= 1000)) return; // パソコンなど、現在地がおおまかにしか分からないときは何も言わない
   if (!(opt.acc <= SUMMIT_ACC)) { // 誤差が大きいときは記録しない
     showErr(`${s.name}の山頂の近くですが、GPSの誤差が大きいため登頂を記録できません（誤差 約${Math.round(opt.acc || 0)}m）。少し待って「現在地で計算」を押し直してください`);
     return;
