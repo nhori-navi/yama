@@ -29,6 +29,7 @@ const camEvt = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsol
 async function camOpen() {
   if (!prof) { toast('計算が終わってから使ってください'); return; }
   if (preview) { toast('予習中はカメラ表示は使えません。「現在地に戻る」を押してください', 3500); return; }
+  if (!sensorOk()) { toast('カメラ表示' + PHONE_ONLY, 4000); return; }
   askOri(); // iPhone：ボタンを押した直後でないと許可を求められないので、カメラより先に向きセンサーの許可を求める
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast('この端末・ブラウザではカメラが使えません', 3500); return; }
   $('cam').style.display = 'block'; $('camMsg').textContent = 'カメラを準備中…';
