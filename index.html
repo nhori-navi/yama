@@ -7,7 +7,7 @@
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <div id="map"></div>
@@ -19,7 +19,7 @@
   目の高さ <input id="eye" type="number" value="2" min="0" step="1">m
   <label><input type="checkbox" id="many">小さな山も表示</label>
   <div>
-    <button id="syncBtn">向きに合わせる</button>
+    <button id="syncBtn">向きに合わせる</button><button id="camBtn">📷 カメラ</button>
     補正 <button id="offMinus">−2°</button><span id="offVal">0°</span><button id="offPlus">＋2°</button>
     <button id="zkBtn">📖 図鑑</button><button id="tdBtn">☀ 今日</button>
   </div>
@@ -47,7 +47,7 @@
 <div id="skyList"></div>
 <div id="hits"></div>
 <div class="small">スマホは写真を撮るときのように立てて持ってください。方角がずれるときは補正ボタンで合わせます。高さ方向は強調して描いています。茶色の山名は日本百名山です。<br>
-「向きに合わせる」をONにして山名を赤い線に2秒合わせると、図鑑に記録されます（名前の右上の金色の点は見つけた山）。山頂で「現在地で計算」を押すと登頂が記録されます。このアプリは道案内ではありません。歩きながら画面を見ないでください。<br>
+「向きに合わせる」をONにして山名を赤い線に2秒合わせると、図鑑に記録されます（名前の右上の金色の点は見つけた山）。山頂で「現在地で計算」を押すと登頂が記録されます。「📷 カメラ」では、カメラの映像に山並みの線と山名を重ねます（方位センサーは5〜10°ほどずれるので、画面をなぞって合わせてください。3分で自動で止まります）。このアプリは道案内ではありません。歩きながら画面を見ないでください。<br>
 オレンジの線は太陽、黄色の線は月の通り道です（点は10分ごと、点線は山の陰）。日の出・日の入りは、山並みから出る・山並みに隠れる時刻です。時刻は数分ずれることがあります。<br>
 🌌星空では、縦と横を同じ縮尺（実際の見え方と同じ比率）で描くため、山は低く平らに見えます。街明かりや地平線近くのかすみで、実際には見えにくい星もあります。星座が昇る・沈む時刻は、星座のまんなかあたり（名前の位置）で計算しています。<br>
 <span id="storeInfo"></span> <button id="refreshBtn">山の一覧を取り直す</button><br>
@@ -66,6 +66,19 @@
   <h3>見つけた山 <span style="font-size:12px;color:#888;font-weight:normal">（タップすると説明が出ます）</span></h3>
   <div class="sort">並べ替え：<button data-s="new">新しい順</button><button data-s="rare">レア順</button><button data-s="far">遠い順</button><button data-s="high">高い順</button></div>
   <div id="zkList"></div>
+</div>
+<div id="cam">
+  <video id="camV" playsinline muted autoplay></video>
+  <canvas id="camC"></canvas>
+  <div id="camLine"></div>
+  <div id="camTop"><button id="camClose">✕ 閉じる</button><span id="camInfo"></span></div>
+  <div id="camToast"></div>
+  <div id="camMsg"></div>
+  <div id="camBottom">
+    <div id="camAim"></div>
+    大きさ <button id="camOut">−</button><button id="camIn">＋</button> <button id="camReset">合わせを戻す</button>
+    <div class="hint">画面をなぞると、線と山名を左右・上下に動かして実際の山に合わせられます。歩きながら見ないでください。</div>
+  </div>
 </div>
 <div id="td">
   <div class="top"><h2>☀ 今日のYamaMiru</h2><button id="tdClose">閉じる</button></div>
@@ -93,6 +106,7 @@
 <script src="js/stars.js?v=1"></script>
 <script src="js/forecast.js?v=1"></script>
 <script src="js/quest.js?v=1"></script>
+<script src="js/camera.js?v=1"></script>
 <script src="js/main.js?v=3"></script>
 </body>
 </html>
