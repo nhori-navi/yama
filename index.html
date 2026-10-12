@@ -7,12 +7,15 @@
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
-<link rel="stylesheet" href="style.css?v=1">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 <div id="map"></div>
 <div id="ctrl">
   <button id="gpsBtn">現在地で計算</button><button id="pickBtn">地図で地点を選ぶ</button><br>
+  <input id="peakQ" type="search" placeholder="山名で探す（例：北岳）" autocomplete="off">
+  <div id="peakList"></div>
+  <div id="previewBar"></div>
   目の高さ <input id="eye" type="number" value="2" min="0" step="1">m
   <label><input type="checkbox" id="many">小さな山も表示</label>
   <div>
@@ -28,6 +31,7 @@
     <button id="dPrev">◀</button><input type="date" id="dIn"><button id="dNext">▶</button><button id="dToday">今日</button>
   </div>
   <div id="astro"></div>
+  <div id="viewBox"></div>
   <div id="dirInfo"></div>
   <div id="aim"></div>
   <div id="status">現在地を取得中…</div>
@@ -37,7 +41,7 @@
 <div id="info">山名をタップすると詳細が出ます</div>
 <div id="hits"></div>
 <div class="small">スマホは写真を撮るときのように立てて持ってください。方角がずれるときは補正ボタンで合わせます。高さ方向は強調して描いています。茶色の山名は日本百名山です。<br>
-「向きに合わせる」をONにして山名を赤い線に2秒合わせると、図鑑に記録されます（名前の右上の金色の点は見つけた山）。<br>
+「向きに合わせる」をONにして山名を赤い線に2秒合わせると、図鑑に記録されます（名前の右上の金色の点は見つけた山）。山頂で「現在地で計算」を押すと登頂が記録されます。このアプリは道案内ではありません。歩きながら画面を見ないでください。<br>
 オレンジの線は太陽、黄色の線は月の通り道です（点は10分ごと、点線は山の陰）。日の出・日の入りは、山並みから出る・山並みに隠れる時刻です。時刻は数分ずれることがあります。<br>
 <span id="storeInfo"></span> <button id="refreshBtn">山の一覧を取り直す</button><br>
 標高：国土地理院 標高タイル／山名：Wikidata、© OpenStreetMap contributors／山の説明：Wikipedia／天体計算：Astronomy Engine</div>
@@ -50,6 +54,8 @@
   <div id="zkTabs"></div>
   <div id="zkF100"></div>
   <div id="zkNote"></div>
+  <h3>登った山 <span style="font-size:12px;color:#888;font-weight:normal">（タップすると説明が出ます）</span></h3>
+  <div id="zkClimbs"></div>
   <h3>見つけた山 <span style="font-size:12px;color:#888;font-weight:normal">（タップすると説明が出ます）</span></h3>
   <div class="sort">並べ替え：<button data-s="new">新しい順</button><button data-s="rare">レア順</button><button data-s="far">遠い順</button><button data-s="high">高い順</button></div>
   <div id="zkList"></div>
@@ -61,6 +67,7 @@
 <script src="js/y100.js?v=1"></script>
 <script src="js/zukan.js?v=1"></script>
 <script src="js/wiki.js?v=1"></script>
-<script src="js/main.js?v=1"></script>
+<script src="js/summit.js?v=1"></script>
+<script src="js/main.js?v=2"></script>
 </body>
 </html>
