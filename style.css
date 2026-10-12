@@ -61,3 +61,14 @@ button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
 #viewBox .top{font-weight:bold;color:#2e7d32}
 #viewBox summary{cursor:pointer;color:#8b4513}
 #viewBox .sub{font-size:12px;color:#666;margin:2px 0 2px 1em}
+#skyBtn.on{background:#1a2a4d;color:#fff;border:1px solid #1a2a4d;border-radius:4px}
+#skyBox{display:none;margin:4px 0;padding:6px 8px;background:#10162a;color:#dfe7f5;border-radius:6px}
+#skyTime{font-size:14px;font-weight:bold;margin-bottom:2px}
+#skyT{width:calc(100% - 70px);vertical-align:middle;padding:0}
+#skyNow{font-size:13px;padding:3px 10px}
+#skyBox .scale{display:flex;justify-content:space-between;width:calc(100% - 70px);font-size:11px;color:#8a94a6}
+#skyList{display:none;max-height:40vh;overflow-y:auto;margin:0 10px 8px;padding:4px 8px;font-size:13px;background:#10162a;color:#dfe7f5;border-radius:6px}
+#skyList .head{color:#aab6cc;font-size:12px;margin:4px 0}
+#skyList .ev{padding:5px 0;border-bottom:1px dotted #33405c;cursor:pointer}
+#skyList .ev.past{color:#66718a}
+#skyList .ev:active{background:#22305a}
