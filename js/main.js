@@ -85,9 +85,23 @@ function headingFrom(a, b, g) {
   if (Math.abs(vz) > 0.8) { vx = -cB * sA; vy = cA * cB; }
   return norm360(Math.atan2(vx, vy) / r);
 }
+// 磁北と真北のずれ（偏角、西向きが正の度）。日本のおおよその値：東京約7.5°、札幌約9°、那覇約5°
+const magDecl = p => p ? 7.5 + 0.3 * (p[1] - 36) - 0.05 * (p[0] - 139) : 7.5;
+// iPhone：向きセンサーは、ボタンを押したときに許可を求める決まりがある（ほかの端末では何もしない）
+let oriPerm = null; // 'asking'（確認中）・'granted'（許可）・'denied'（不許可）
+function askOri() {
+  const D = window.DeviceOrientationEvent;
+  if (!D || typeof D.requestPermission !== 'function' || oriPerm) return;
+  oriPerm = 'asking';
+  D.requestPermission().then(r => {
+    oriPerm = r;
+    if (r === 'granted') window.addEventListener('deviceorientation', onOri);
+    else showErr('向きセンサーの使用が許可されませんでした。ページを開き直して、もう一度「向きに合わせる」を押し、「許可」を選んでください');
+  }).catch(e => { oriPerm = null; showErr('向きセンサーを使えませんでした（' + e.message + '）'); });
+}
 function onOri(e) {
   let h;
-  if (e.webkitCompassHeading != null) h = e.webkitCompassHeading;
+  if (e.webkitCompassHeading != null) h = e.webkitCompassHeading - magDecl(obs); // iPhone は磁北が基準なので真北に直す
   else if (e.alpha != null && (e.type === 'deviceorientationabsolute' || e.absolute)) h = headingFrom(e.alpha, e.beta || 0, e.gamma || 0);
   else return;
   gotOri = true;
@@ -104,12 +118,13 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 function setSync(on) {
+  if (on) askOri(); // iPhone では、ここで向きセンサーの許可を求める
   sync = on;
   $('syncBtn').classList.toggle('on', on);
   $('syncBtn').textContent = on ? '向きに合わせる：ON' : '向きに合わせる';
   $('center').style.display = on ? 'block' : 'none';
   if (!on) $('dirInfo').textContent = '';
-  if (on) setTimeout(() => { if (sync && !gotOri) { $('dirInfo').textContent = 'この端末では方位センサーが使えないようです'; } }, 1500);
+  if (on) setTimeout(() => { if (sync && !gotOri && oriPerm !== 'asking') { $('dirInfo').textContent = 'この端末では方位センサーが使えないようです'; } }, 1500);
 }
 $('syncBtn').onclick = () => setSync(!sync);
 ['touchstart', 'mousedown', 'wheel'].forEach(ev => $('panoWrap').addEventListener(ev, () => { if (sync) setSync(false); }, {passive:true}));
