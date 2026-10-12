@@ -7,7 +7,7 @@
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <div id="map"></div>
@@ -28,9 +28,14 @@
   </div>
   <div id="astroCtrl">
     <label><input type="checkbox" id="astroOn" checked>太陽と月</label>
-    <button id="dPrev">◀</button><input type="date" id="dIn"><button id="dNext">▶</button><button id="dToday">今日</button>
+    <button id="dPrev">◀</button><input type="date" id="dIn"><button id="dNext">▶</button><button id="dToday">今日</button><button id="skyBtn" style="display:none">🌌 星空</button>
   </div>
   <div id="astro"></div>
+  <div id="skyBox">
+    <div id="skyTime"></div>
+    <input type="range" id="skyT" min="0" max="960" step="5"><button id="skyNow">いま</button>
+    <div class="scale"><span>16時</span><span>20時</span><span>0時</span><span>4時</span><span>8時</span></div>
+  </div>
   <div id="viewBox"></div>
   <div id="dirInfo"></div>
   <div id="aim"></div>
@@ -39,12 +44,14 @@
 </div>
 <div id="panoBox"><div id="panoWrap"><canvas id="pano"></canvas></div><div id="center"></div><div id="toast"></div></div>
 <div id="info">山名をタップすると詳細が出ます</div>
+<div id="skyList"></div>
 <div id="hits"></div>
 <div class="small">スマホは写真を撮るときのように立てて持ってください。方角がずれるときは補正ボタンで合わせます。高さ方向は強調して描いています。茶色の山名は日本百名山です。<br>
 「向きに合わせる」をONにして山名を赤い線に2秒合わせると、図鑑に記録されます（名前の右上の金色の点は見つけた山）。山頂で「現在地で計算」を押すと登頂が記録されます。このアプリは道案内ではありません。歩きながら画面を見ないでください。<br>
 オレンジの線は太陽、黄色の線は月の通り道です（点は10分ごと、点線は山の陰）。日の出・日の入りは、山並みから出る・山並みに隠れる時刻です。時刻は数分ずれることがあります。<br>
+🌌星空では、縦と横を同じ縮尺（実際の見え方と同じ比率）で描くため、山は低く平らに見えます。街明かりや地平線近くのかすみで、実際には見えにくい星もあります。星座が昇る・沈む時刻は、星座のまんなかあたり（名前の位置）で計算しています。<br>
 <span id="storeInfo"></span> <button id="refreshBtn">山の一覧を取り直す</button><br>
-標高：国土地理院 標高タイル／山名：Wikidata、© OpenStreetMap contributors／山の説明：Wikipedia／天体計算：Astronomy Engine</div>
+標高：国土地理院 標高タイル／山名：Wikidata、© OpenStreetMap contributors／山の説明：Wikipedia／天体計算：Astronomy Engine<br>星座と星のデータ：SoraMiru（星座の線は d3-celestial　Copyright (c) 2015, Olaf Frohn　BSD 3-Clause License）</div>
 <div id="zk">
   <div class="top"><h2>📖 YamaMiru 山の図鑑</h2><button id="zkClose">閉じる</button></div>
   <div id="zkSum"></div>
@@ -68,6 +75,10 @@
 <script src="js/zukan.js?v=1"></script>
 <script src="js/wiki.js?v=1"></script>
 <script src="js/summit.js?v=1"></script>
-<script src="js/main.js?v=2"></script>
+<!-- 星座と星のデータは SoraMiru から読み込む（読み込めないときは星空ボタンを出さない） -->
+<script src="https://nhori-navi.github.io/sora/constellations.js"></script>
+<script src="https://nhori-navi.github.io/sora/data.js"></script>
+<script src="js/stars.js?v=1"></script>
+<script src="js/main.js?v=3"></script>
 </body>
 </html>
