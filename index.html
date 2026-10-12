@@ -7,7 +7,7 @@
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <div id="map"></div>
@@ -21,7 +21,7 @@
   <div>
     <button id="syncBtn">向きに合わせる</button>
     補正 <button id="offMinus">−2°</button><span id="offVal">0°</span><button id="offPlus">＋2°</button>
-    <button id="zkBtn">📖 図鑑</button>
+    <button id="zkBtn">📖 図鑑</button><button id="tdBtn">☀ 今日</button>
   </div>
   <div>
     向き：<button data-az="0">北</button><button data-az="90">東</button><button data-az="180">南</button><button data-az="270">西</button>
@@ -51,7 +51,7 @@
 オレンジの線は太陽、黄色の線は月の通り道です（点は10分ごと、点線は山の陰）。日の出・日の入りは、山並みから出る・山並みに隠れる時刻です。時刻は数分ずれることがあります。<br>
 🌌星空では、縦と横を同じ縮尺（実際の見え方と同じ比率）で描くため、山は低く平らに見えます。街明かりや地平線近くのかすみで、実際には見えにくい星もあります。星座が昇る・沈む時刻は、星座のまんなかあたり（名前の位置）で計算しています。<br>
 <span id="storeInfo"></span> <button id="refreshBtn">山の一覧を取り直す</button><br>
-標高：国土地理院 標高タイル／山名：Wikidata、© OpenStreetMap contributors／山の説明：Wikipedia／天体計算：Astronomy Engine<br>星座と星のデータ：SoraMiru（星座の線は d3-celestial　Copyright (c) 2015, Olaf Frohn　BSD 3-Clause License）</div>
+標高：国土地理院 標高タイル／山名：Wikidata、© OpenStreetMap contributors／山の説明：Wikipedia／天体計算：Astronomy Engine／天気：Open-Meteo.com<br>星座と星のデータ：SoraMiru（星座の線は d3-celestial　Copyright (c) 2015, Olaf Frohn　BSD 3-Clause License）</div>
 <div id="zk">
   <div class="top"><h2>📖 YamaMiru 山の図鑑</h2><button id="zkClose">閉じる</button></div>
   <div id="zkSum"></div>
@@ -67,6 +67,18 @@
   <div class="sort">並べ替え：<button data-s="new">新しい順</button><button data-s="rare">レア順</button><button data-s="far">遠い順</button><button data-s="high">高い順</button></div>
   <div id="zkList"></div>
 </div>
+<div id="td">
+  <div class="top"><h2>☀ 今日のYamaMiru</h2><button id="tdClose">閉じる</button></div>
+  <h3>🎯 今日のお題</h3>
+  <div id="qBox"></div>
+  <h3>🌤 今日は見える？予報</h3>
+  <div id="wxBox"></div>
+  <div id="favAdd">いま計算している地点を <input id="favName" placeholder="名前（例：自宅）" maxlength="12"><button id="favBtn">⭐ お気に入りに登録</button>
+    <div class="note">お気に入りは5か所まで。登録したときに見えた山のうち、名山や遠い山を3座まで代表として予報します。</div></div>
+  <h3>📅 見えた記録</h3>
+  <div id="calBox"></div>
+  <div class="note" style="margin-top:14px">予報は雲・雨・見通し・湿度から計算した目安です。遠くの山の「かすみ」は予報が苦手なので、100km以上先の山は外れることがあります。山頂だけにかかる雲は分かりません。<br>天気データ：<a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a>（CC BY 4.0）</div>
+</div>
 <!-- 読み込む順番に意味があります（main.js を最後に） -->
 <script src="js/core.js?v=1"></script>
 <script src="js/peaks.js?v=1"></script>
@@ -79,6 +91,8 @@
 <script src="https://nhori-navi.github.io/sora/constellations.js"></script>
 <script src="https://nhori-navi.github.io/sora/data.js"></script>
 <script src="js/stars.js?v=1"></script>
+<script src="js/forecast.js?v=1"></script>
+<script src="js/quest.js?v=1"></script>
 <script src="js/main.js?v=3"></script>
 </body>
 </html>
