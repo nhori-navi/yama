@@ -90,8 +90,9 @@ function camDraw() {
   const r = Math.PI / 180;
   const e = Math.asin(Math.max(-1, Math.min(1, cam.vz))) / r + camSet.tilt; // カメラの上下の向き（水平が0°）
   const roll = Math.atan2(cam.ux, cam.uy);                                  // 左右の傾き
-  $('camMsg').textContent = Math.abs(e) > 60 ? 'スマホを立てて、山のほうに向けてください' : '';
-  if (Math.abs(e) > 60) return;
+  const eMax = typeof camMaxEl === 'function' ? camMaxEl() : 60; // 上下に向けられる限度（夜は camsky.js で広げる）
+  $('camMsg').textContent = Math.abs(e) > eMax ? 'スマホを立てて、山のほうに向けてください' : '';
+  if (Math.abs(e) > eMax) return;
   const F = camF(), h = head, half = Math.atan(Math.hypot(W, Hh) / 2 / F) / r + 2; // 画面に入る範囲（度）
   g.save(); g.translate(W / 2, Hh / 2); g.rotate(roll);
   // 山並みの線（いちばん遠くまで見た稜線）
