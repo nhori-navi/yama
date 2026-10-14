@@ -83,7 +83,8 @@ function headingFrom(a, b, g) {
     cG = Math.cos(g * r), sG = Math.sin(g * r);
   let vx = -(cG * sA * sB + cA * sG), vy = -(sA * sG - cA * cG * sB);
   const vz = -cB * cG;
-  if (Math.abs(vz) > 0.8) { vx = -cB * sA; vy = cA * cB; }
+  if (vz < -0.8) { vx = -cB * sA; vy = cA * cB; }      // 水平に置いたとき（画面が上）は上端の向き
+  else if (vz > 0.8) { vx = cB * sA; vy = -cA * cB; }  // 見上げたときは下端の向き（カメラの向きとそろう）
   return norm360(Math.atan2(vx, vy) / r);
 }
 // 磁北と真北のずれ（偏角、西向きが正の度）。日本のおおよその値：東京約7.5°、札幌約9°、那覇約5°
