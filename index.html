@@ -7,7 +7,7 @@
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <div id="map"></div>
@@ -47,7 +47,7 @@
 <div id="skyList"></div>
 <div id="hits"></div>
 <div class="small">現在地が分からないときは、地図をタップして場所を選んでください。スマホは写真を撮るときのように立てて持ってください。iPhoneでは、最初に「向きに合わせる」か「📷 カメラ」を押したときに、向きセンサーの使用を「許可」してください。方角がずれるときは補正ボタンで合わせます。高さ方向は強調して描いています。茶色の山名は日本百名山です。<br>
-「向きに合わせる」をONにして山名を赤い線に2秒合わせると、図鑑に記録されます（名前の右上の金色の点は見つけた山）。山頂で「現在地で計算」を押すと登頂が記録されます。「📷 カメラ」では、カメラの映像に山並みの線と山名を重ねます（スマホ専用。方位センサーは5〜10°ほどずれるので、画面をなぞって合わせてください。3分で自動で止まります。「🎯 自動で合わせる」は、晴れて山の形がくっきり見えるときに、空と山の境目から自動で合わせる実験的な機能です）。このアプリは道案内ではありません。歩きながら画面を見ないでください。<br>
+「向きに合わせる」をONにして山名を赤い線に2秒合わせると、図鑑に記録されます（名前の右上の金色の点は見つけた山）。山頂で「現在地で計算」を押すと登頂が記録されます。「📷 カメラ」では、カメラの映像に山並みの線と山名を重ねます（スマホ専用。方位センサーは5〜10°ほどずれるので、画面をなぞって合わせてください。3分で自動で止まります。「🎯 自動で合わせる」は、晴れて山の形がくっきり見えるときに、空と山の境目から自動で合わせる実験的な機能です。暗くなると星座・明るい星・惑星・月も重ねて表示し、本物の月・惑星・明るい星を中央の黄色の輪に入れて「⭐ 星で合わせる」を押すと方角を合わせられます）。このアプリは道案内ではありません。歩きながら画面を見ないでください。<br>
 パソコンでは「向きに合わせる」「📷 カメラ」は使えません。現在地はWi-Fiなどから推定するので数km以上ずれることがあり、そのときは「地図で地点を選ぶ」が正確です。記録はスマホとパソコンで別々なので、移すときは図鑑の「記録の書き出し・読み込み」を使ってください。<br>
 オレンジの線は太陽、黄色の線は月の通り道です（点は10分ごと、点線は山の陰）。日の出・日の入りは、山並みから出る・山並みに隠れる時刻です。時刻は数分ずれることがあります。<br>
 🌌星空では、縦と横を同じ縮尺（実際の見え方と同じ比率）で描くため、山は低く平らに見えます。街明かりや地平線近くのかすみで、実際には見えにくい星もあります。星座が昇る・沈む時刻は、星座のまんなかあたり（名前の位置）で計算しています。<br>
@@ -84,7 +84,8 @@
   <div id="camBottom">
     <div id="camAim"></div>
     <div id="fitBox"></div>
-    大きさ <button id="camOut">−</button><button id="camIn">＋</button> <button id="fitBtn">🎯 自動で合わせる</button> <button id="camReset">合わせを戻す</button>
+    <div id="starCalBox"></div>
+    大きさ <button id="camOut">−</button><button id="camIn">＋</button> <button id="fitBtn">🎯 自動で合わせる</button><button id="starCalBtn" style="display:none">⭐ 星で合わせる</button> <button id="camReset">合わせを戻す</button>
     <div class="hint">画面をなぞると、線と山名を左右・上下に動かして実際の山に合わせられます。歩きながら見ないでください。</div>
   </div>
 </div>
@@ -114,9 +115,10 @@
 <script src="js/stars.js?v=1"></script>
 <script src="js/forecast.js?v=1"></script>
 <script src="js/quest.js?v=2"></script>
-<script src="js/camera.js?v=3"></script>
+<script src="js/camera.js?v=4"></script>
 <script src="js/skyline.js?v=1"></script>
+<script src="js/camsky.js?v=1"></script>
 <script src="js/backup.js?v=1"></script>
-<script src="js/main.js?v=5"></script>
+<script src="js/main.js?v=6"></script>
 </body>
 </html>
