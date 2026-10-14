@@ -139,3 +139,6 @@ button,input{font-size:15px;padding:5px 9px;margin:2px 4px 2px 0}
   #ctrl,#info,#hits,.small{max-width:960px;margin-left:auto;margin-right:auto}
   #skyList{max-width:940px;margin-left:auto;margin-right:auto}
 }
+#camBottom #starCalBtn{font-size:13px;padding:4px 8px;background:#ffd257;border:1px solid #c9a227;border-radius:4px}
+#starCalBox{display:none;margin:4px 0 6px;padding:6px 8px;background:rgba(255,210,87,.18);border:1px solid #ffd257;border-radius:6px;font-size:13px;line-height:1.5}
+#starCalBox button{font-size:13px;padding:3px 10px;margin:4px 6px 0 0}
