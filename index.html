@@ -4,14 +4,29 @@
 <meta charset="utf-8">
 <title>YamaMiru（山座同定）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#2e7d32">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="YamaMiru">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<script>
+// 版の決まり：YAMA_V はアプリの版。YAMA_NEED は版の印を付けたファイルと、その必要な版（各ファイルの先頭の YAMA_FV と比べる）
+// ファイルを直したら、そのファイルの ?v= と先頭の印と、ここの数字をそろえて上げる
+window.YAMA_V = 11; window.YAMA_DATE = '2026-10-22';
+window.YAMA_NEED = {core:3, zukan:3, app:1, help:2};
+</script>
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
 <div id="map"></div>
 <div id="ctrl">
+  <div id="verWarn"></div>
   <button id="gpsBtn">現在地で計算</button><button id="pickBtn">地図で地点を選ぶ</button><br>
   <input id="peakQ" type="search" placeholder="山名で探す（例：北岳）" autocomplete="off">
   <div id="peakList"></div>
@@ -48,6 +63,20 @@
 <div id="hits"></div>
 <div class="small">使い方は上の「？ 使い方」で見られます。このアプリは道案内ではありません。歩きながら画面を見ないでください。<br>
 <span id="storeInfo"></span> <button id="refreshBtn">山の一覧を取り直す</button><br>
+<div id="appRow"><span id="appState"></span><button id="appAdd">📲 ホーム画面に追加</button><div id="appHow"></div></div>
+<details id="sendInfo"><summary>この端末の外へ送る情報</summary>
+<div class="si">このアプリの運営者のサーバーはありません。次のサービスに、アプリから直接問い合わせます（通信の仕組み上、送り先には IP アドレスとブラウザの種類が伝わります）。
+<ul>
+<li><b>国土地理院</b>（標高タイル）：計算する地点のまわり約150kmの範囲のタイル番号 → 山並みの計算</li>
+<li><b>Wikidata</b>：計算する地点を約1km単位に丸めた座標（まわり200kmの山の一覧）、山名で探したときはその文字、図鑑の名山リストの山名 → 山名と標高</li>
+<li><b>OpenStreetMap（Overpass）</b>：「小さな山も表示」のとき、縦横1度のマスの範囲 → 小さな山の名前</li>
+<li><b>Wikipedia</b>：山の説明を開いたとき、その山の記事名 → 山の説明</li>
+<li><b>Mapbox</b>：表示している地図の範囲、場所スタンプのために計算する地点を約100m単位に丸めた座標 → 地図・市区町村名</li>
+<li><b>Open-Meteo</b>：「今日」の予報で、計算する地点・お気に入りの地点・代表の山を約1km単位に丸めた座標 → 天気予報</li>
+<li><b>jsDelivr</b>・<b>TenMiru</b>（同じ nhori-navi.github.io）：天体計算のプログラムと星座のデータを受け取るだけ（送る情報なし）</li>
+</ul>
+送らないもの：カメラの映像（山並みとの照合は端末の中だけで行います）、向きセンサーの値、図鑑などの記録（端末の中だけに保存。「記録を書き出す」で作ったファイルは自分で管理してください）。</div></details>
+<div id="verT"></div>
 標高：国土地理院 標高タイル／山名：Wikidata、© OpenStreetMap contributors／山の説明：Wikipedia／天体計算：Astronomy Engine／天気：Open-Meteo.com<br>星座と星のデータ：TenMiru（星座の線は d3-celestial　Copyright (c) 2015, Olaf Frohn　BSD 3-Clause License）</div>
 <div id="zk">
   <div class="top"><h2>📖 YamaMiru 山の図鑑</h2><button id="zkClose">閉じる</button></div>
@@ -97,12 +126,12 @@
   <div id="calBox"></div>
   <div class="note" style="margin-top:14px">予報は雲・雨・見通し・湿度から計算した目安です。遠くの山の「かすみ」は予報が苦手なので、100km以上先の山は外れることがあります。山頂だけにかかる雲は分かりません。<br>天気データ：<a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a>（CC BY 4.0）</div>
 </div>
-<!-- 読み込む順番に意味があります（main.js のあとは help.js だけ） -->
-<script src="js/core.js?v=2"></script>
+<!-- 読み込む順番に意味があります（main.js のあとは app.js・help.js だけ） -->
+<script src="js/core.js?v=3"></script>
 <script src="js/peaks.js?v=1"></script>
 <script src="js/astro.js?v=1"></script>
 <script src="js/y100.js?v=1"></script>
-<script src="js/zukan.js?v=2"></script>
+<script src="js/zukan.js?v=3"></script>
 <script src="js/wiki.js?v=1"></script>
 <script src="js/summit.js?v=2"></script>
 <!-- 星座と星のデータは TenMiru（sora）から読み込む（読み込めないときは星空ボタンを出さない） -->
@@ -116,6 +145,7 @@
 <script src="js/camsky.js?v=1"></script>
 <script src="js/backup.js?v=1"></script>
 <script src="js/main.js?v=6"></script>
-<script src="js/help.js?v=1"></script>
+<script src="js/app.js?v=1"></script>
+<script src="js/help.js?v=2"></script>
 </body>
 </html>
