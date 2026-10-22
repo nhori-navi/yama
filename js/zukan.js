@@ -1,4 +1,5 @@
 // YamaMiru：山の図鑑・名山リスト・バッジ・見つける判定
+(window.YAMA_FV = window.YAMA_FV || {}).zukan = 3;
 // ---------- 山の図鑑 ----------
 // 保存形式：{peaks:{キー:{n:名前, h:標高, f:百名山=1, id:WikidataのID, p:[経度,緯度], t1:初めて見つけた日時, t2:最後に見つけた日時,
 //   c:見つけた回数, from:[経度,緯度]（初めて見つけた場所）, place:初めて見つけた市区町村, pl:{市区町村:日時}（場所スタンプ）,
@@ -64,14 +65,14 @@ function toast(t, ms) {
   const el = $('toast'); el.textContent = t; el.style.display = 'block';
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.style.display = 'none'; }, ms || 2800);
 }
-// 計算している地点の市区町村名（場所スタンプ用。Mapboxで調べる）
+// 計算している地点の市区町村名（場所スタンプ用。Mapboxで調べる。送る座標は約100m単位に丸める）
 async function updatePlace() {
   const key = obsKey();
   if (lowAcc) { curPlace = ''; placeFor = ''; return; } // 現在地の精度が粗いときは、違う町のスタンプにならないよう調べない
   if (!obs || placeFor === key) return;
   placeFor = key; curPlace = '';
   try {
-    const r = await tfetch(`https://api.mapbox.com/search/geocode/v6/reverse?longitude=${obs[0].toFixed(5)}&latitude=${obs[1].toFixed(5)}&types=place&language=ja&access_token=${TOKEN}`, {}, 10000);
+    const r = await tfetch(`https://api.mapbox.com/search/geocode/v6/reverse?longitude=${obs[0].toFixed(3)}&latitude=${obs[1].toFixed(3)}&types=place&language=ja&access_token=${TOKEN}`, {}, 10000);
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const f = ((await r.json()).features || [])[0], pr = f && f.properties, name = pr && (pr.name_preferred || pr.name);
     if (key === obsKey()) { curPlace = name || ''; if (!name) placeFor = ''; }

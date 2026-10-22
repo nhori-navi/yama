@@ -1,4 +1,5 @@
 // YamaMiru：共通の道具・地図・標高タイル・稜線の計算
+(window.YAMA_FV = window.YAMA_FV || {}).core = 3;
 const TOKEN = 'pk.eyJ1IjoiaG9yaWhha28iLCJhIjoiY211djd0ejljMDA5ZjMycHYxaTY3M3BsdSJ9.a1yefJYynC4k_YvllM5DVw';
 mapboxgl.accessToken = TOKEN;
 const $ = id => document.getElementById(id);
@@ -40,8 +41,54 @@ const tiles = new Map();
 try { offset = Number(localStorage.getItem('yama_offset')) || 0; } catch (e) {}
 
 // ---------- 共通 ----------
-const status = t => { $('status').textContent = t; };
-const showErr = t => { $('err').textContent = t; };
+// 英語のエラーを日本語に直す（分からないものはそのまま）
+function jaText(t) {
+  return String(t == null ? '' : t)
+    .replace(/Failed to fetch|NetworkError[^）)]*|Load failed|Network request failed|ERR_INTERNET_DISCONNECTED/gi, '通信できません（電波やWi-Fiの状態を確かめてください）')
+    .replace(/The user aborted a request\.?|signal is aborted[^）)]*|The operation was aborted\.?|Timeout expired/gi, '時間切れ')
+    .replace(/QuotaExceededError|exceeded the quota[^）)]*/gi, '保存する場所がいっぱい')
+    .replace(/User denied Geolocation|User denied the request for Geolocation/gi, '位置情報が許可されていません')
+    .replace(/Unexpected token[^）)]*|Unexpected end of JSON input|is not valid JSON[^）)]*/gi, 'データの形が正しくありません')
+    .replace(/HTTP 429\b/g, 'HTTP 429（混雑）')
+    .replace(/HTTP (5\d\d)\b/g, 'HTTP $1（相手のサーバーの不調）');
+}
+const status = t => { $('status').textContent = jaText(t); };
+const showErr = t => { $('err').textContent = jaText(t); };
+// 記録の保存に失敗したら知らせる（10分に1回まで）。山の一覧などの控えは、保存できなくても取り直せるので知らせない
+// 同じアドレス（nhori-navi.github.io）の SoraMiru・MichiMiru なども、同じ保存場所（全体で約5MB）を使っている
+const REC_KEYS = ['yama_zukan_v1', 'yama_quest_v1', 'yama_seen_v1', 'yama_fav_v1', 'yama_offset', 'yama_cam'];
+let lsWarnAt = 0;
+(() => {
+  try {
+    const orig = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      try { return orig.call(this, k, v); }
+      catch (e) {
+        if (this === window.localStorage && REC_KEYS.includes(k) && Date.now() - lsWarnAt > 600000) {
+          lsWarnAt = Date.now();
+          const el = $('err');
+          if (el) el.textContent = '⚠ 記録を保存できませんでした（この端末の保存する場所がいっぱいの可能性があります）。図鑑のいちばん下の「記録を書き出す」で控えを取り、「山の一覧を取り直す」を押すと空きが増えることがあります。';
+        }
+        throw e;
+      }
+    };
+  } catch (e) {}
+})();
+// 思わぬエラーで止まったときは、画面の下に理由を出す（ほかのサイトのファイルのエラーは中身が分からないので出さない）
+window.addEventListener('error', e => {
+  const t = e.target;
+  if (t && t !== window && t.tagName === 'SCRIPT') { // ファイルを読み込めなかった
+    if (t.src && t.src.indexOf('/yama/') >= 0) showErr('⚠ ' + t.src.replace(/^.*\/yama\//, '').replace(/\?.*$/, '') + ' を読み込めませんでした。通信できる場所で開き直してください');
+    return;
+  }
+  if (!e.filename || e.filename.indexOf('/yama/') < 0 || !e.message || e.message === 'Script error.') return;
+  showErr(`⚠ 思わぬエラーが起きました：${e.message.replace(/^Uncaught /, '')}（${e.filename.replace(/^.*\/yama\//, '').replace(/\?.*$/, '')} ${e.lineno}行目）。画面を読み込み直してください。続くときは、この文をそのまま伝えてください`);
+}, true);
+window.addEventListener('unhandledrejection', e => {
+  const r = e.reason;
+  if (!r || !/^(TypeError|ReferenceError|RangeError|SyntaxError)$/.test(r.name) || /fetch|network|Load failed/i.test(r.message)) return; // 通信の失敗はそれぞれの場所で知らせる
+  showErr(`⚠ 思わぬエラーが起きました：${r.message}。画面を読み込み直してください。続くときは、この文をそのまま伝えてください`);
+});
 const tick = () => new Promise(r => setTimeout(r));
 const sleep = s => new Promise(r => setTimeout(r, s * 1000));
 const norm360 = a => ((a % 360) + 360) % 360;
@@ -52,7 +99,7 @@ async function tfetch(url, opt, ms) {
   const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
   try { return await fetch(url, {...opt, signal:ctl.signal}); } finally { clearTimeout(t); }
 }
-const errText = (e, ms) => e.name === 'AbortError' ? `${ms / 1000}秒で応答なし` : e.message;
+const errText = (e, ms) => e.name === 'AbortError' ? `${ms / 1000}秒で応答なし` : jaText(e.message);
 // Wikidataの返事を読む（時間切れで途中までしか届かなかった場合を見分ける）
 async function readWd(r) {
   const text = await r.text();
