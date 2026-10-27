@@ -15,8 +15,8 @@
 <script>
 // 版の決まり：YAMA_V はアプリの版。YAMA_NEED は版の印を付けたファイルと、その必要な版（各ファイルの先頭の YAMA_FV と比べる）
 // ファイルを直したら、そのファイルの ?v= と先頭の印と、ここの数字をそろえて上げる
-window.YAMA_V = 11; window.YAMA_DATE = '2026-10-22';
-window.YAMA_NEED = {core:3, zukan:3, app:1, help:2};
+window.YAMA_V = 12; window.YAMA_DATE = '2026-10-27';
+window.YAMA_NEED = {core:3, zukan:3, app:1, help:2, inapp:12};
 </script>
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
@@ -147,5 +147,7 @@ window.YAMA_NEED = {core:3, zukan:3, app:1, help:2};
 <script src="js/main.js?v=6"></script>
 <script src="js/app.js?v=1"></script>
 <script src="js/help.js?v=2"></script>
+<!-- 版12：MichiMiru のアプリの中で開いているときだけ動く -->
+<script src="js/inapp.js?v=12"></script>
 </body>
 </html>
