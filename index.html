@@ -15,8 +15,8 @@
 <script>
 // 版の決まり：YAMA_V はアプリの版。YAMA_NEED は版の印を付けたファイルと、その必要な版（各ファイルの先頭の YAMA_FV と比べる）
 // ファイルを直したら、そのファイルの ?v= と先頭の印と、ここの数字をそろえて上げる
-window.YAMA_V = 13; window.YAMA_DATE = '2026-10-27';
-window.YAMA_NEED = {core:3, zukan:3, app:1, help:2, inapp:13};
+window.YAMA_V = 14; window.YAMA_DATE = '2026-10-28';
+window.YAMA_NEED = {core:3, zukan:3, app:1, help:14, inapp:13, layout:14};
 </script>
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
@@ -126,7 +126,7 @@ window.YAMA_NEED = {core:3, zukan:3, app:1, help:2, inapp:13};
   <div id="calBox"></div>
   <div class="note" style="margin-top:14px">予報は雲・雨・見通し・湿度から計算した目安です。遠くの山の「かすみ」は予報が苦手なので、100km以上先の山は外れることがあります。山頂だけにかかる雲は分かりません。<br>天気データ：<a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a>（CC BY 4.0）</div>
 </div>
-<!-- 読み込む順番に意味があります（main.js のあとは app.js・help.js だけ） -->
+<!-- 読み込む順番に意味があります（main.js のあとは app.js・help.js・layout.js・inapp.js だけ） -->
 <script src="js/core.js?v=3"></script>
 <script src="js/peaks.js?v=1"></script>
 <script src="js/astro.js?v=1"></script>
@@ -146,7 +146,9 @@ window.YAMA_NEED = {core:3, zukan:3, app:1, help:2, inapp:13};
 <script src="js/backup.js?v=1"></script>
 <script src="js/main.js?v=6"></script>
 <script src="js/app.js?v=1"></script>
-<script src="js/help.js?v=2"></script>
+<script src="js/help.js?v=14"></script>
+<!-- 版14：画面の並べ替え（山並みを上に、よく使うボタンを下に固定） -->
+<script src="js/layout.js?v=14"></script>
 <!-- 版12：MichiMiru のアプリの中で開いているときだけ動く -->
 <script src="js/inapp.js?v=13"></script>
 </body>
