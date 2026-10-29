@@ -1,8 +1,8 @@
-// YamaMiru 版15：暗い画面（layout.js のあと・inapp.js の前に読む）
+// YamaMiru 版15：暗い画面（layout.js のあと・inapp.js の前に読む）。版16：入切を小さなスイッチに（使い方ナビ・小さな山も表示・太陽と月）
 // ・MichiMiru アプリの中では、MichiMiru の「画面の明るさ」に合わせる（MichiMiru 版37 が miruThemeSet(t) で知らせる。t = {dark, preset}）
 // ・Chrome で単独で開いたときは、スマホの設定（ダークモード）に合わせる
 // 色は MichiMiru の暗い画面（地 #1e2522・カード #28322e・文字 #f1f5f2）にそろえる。山並みの夜の色は main.js の draw()
-(window.YAMA_FV = window.YAMA_FV || {}).theme = 15;
+(window.YAMA_FV = window.YAMA_FV || {}).theme = 16;
 (function () {
   const st = document.createElement('style');
   st.id = 'yamaDark';
@@ -51,7 +51,13 @@
     `${D} #sendInfo summary{color:#8ec5ff}${D} #sendInfo .si{color:#c9d3cd}${D} #appRow #appState{color:#a8e0b4}${D} #appHow{color:#c9d3cd}`,
     // index.html の中に直接書いた灰色の注記
     `${D} h3 span[style*="#888"]{color:#a9b5ad !important}`,
-    `html.predark,html.predark body{background:#1e2522}`
+    `html.predark,html.predark body{background:#1e2522}`,
+    // 版16：入切は MichiMiru と同じ形の小さなスイッチ（入は緑）。動きと保存はそのまま
+    `#helpChk,#many,#astroOn{appearance:none;-webkit-appearance:none;flex:none;display:inline-block;width:40px;height:24px;margin:0 6px 0 0;padding:0;border:0;border-radius:12px;background:#c9d3cd;position:relative;vertical-align:middle;cursor:pointer;transition:background .15s}`,
+    `#helpChk::before,#many::before,#astroOn::before{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:left .15s}`,
+    `#helpChk:checked,#many:checked,#astroOn:checked{background:#2e7d32}#helpChk:checked::before,#many:checked::before,#astroOn:checked::before{left:19px}`,
+    `label:has(> #helpChk),label:has(> #many),label:has(> #astroOn){display:inline-flex;align-items:center;cursor:pointer;min-height:32px}`,
+    `${D} #helpChk,${D} #many,${D} #astroOn{background:#4a5852}${D} #helpChk:checked,${D} #many:checked,${D} #astroOn:checked{background:#3aa85a}`
   ].join('\n');
   document.head.appendChild(st);
 
