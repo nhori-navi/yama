@@ -5,7 +5,11 @@ function draw() {
   const W = Math.round((360 + OFF * 2) * PXD), c = $('pano'), dpr = Math.min(2, window.devicePixelRatio || 1);
   c.width = W * dpr; c.height = H * dpr; c.style.width = W + 'px'; c.style.height = H + 'px';
   const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#d8e6f5'); sky.addColorStop(1, '#f6f9fc');
+  // 版15：暗い画面のときは夜の色（空は紺、山は暗い青灰、文字は明るく）
+  const DK = document.body.classList.contains('dark');
+  const C = DK ? {s0: '#16233a', s1: '#24324a', bands: ['#0d1420', '#1a2536', '#2a374b', '#3c4a60'], axis: '#1c2530', tick: '#cfd8e6', deg: '#8a94a6', name: '#e8eef5', line: '#8d9bb0', f100: '#e8a970', sel: '#ff7b6b'}
+               : {s0: '#d8e6f5', s1: '#f6f9fc', bands: COLS, axis: '#fff', tick: '#333', deg: '#999', name: '#222', line: '#555', f100: '#8b4513', sel: '#c0392b'};
+  const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, C.s0); sky.addColorStop(1, C.s1);
   g.fillStyle = sky; g.fillRect(0, 0, W, H);
   hits = [];
   if (!prof) return;
@@ -20,15 +24,15 @@ function draw() {
     g.beginPath(); g.moveTo(0, plotBot);
     for (let k = -offN; k <= N + offN; k++) g.lineTo(xOf(k * STEP), y(arr[((k % N) + N) % N]));
     g.lineTo(W, plotBot); g.closePath();
-    g.fillStyle = COLS[b]; g.fill();
+    g.fillStyle = C.bands[b]; g.fill();
   }
-  g.fillStyle = '#fff'; g.fillRect(0, plotBot, W, AXIS);
+  g.fillStyle = C.axis; g.fillRect(0, plotBot, W, AXIS);
   g.textAlign = 'center';
   for (let az = -OFF; az <= 360 + OFF; az += 5) {
     const x = xOf(az), a = norm360(az);
-    g.fillStyle = '#333'; g.fillRect(x, plotBot, 1, a % 45 === 0 ? 8 : 4);
+    g.fillStyle = C.tick; g.fillRect(x, plotBot, 1, a % 45 === 0 ? 8 : 4);
     if (a % 45 === 0) { g.font = 'bold 13px sans-serif'; g.fillText(DIR8[a / 45], x, plotBot + 19); }
-    else if (a % 15 === 0) { g.font = '11px sans-serif'; g.fillStyle = '#999'; g.fillText(a + '°', x, plotBot + 18); }
+    else if (a % 15 === 0) { g.font = '11px sans-serif'; g.fillStyle = C.deg; g.fillText(a + '°', x, plotBot + 18); }
   }
   if (astroOn()) { try { drawAstro(g, yRaw, W, plotBot, lo, hi); } catch (e) { showErr('太陽と月の計算エラー：' + e.message); } }
   g.textAlign = 'center';
@@ -36,12 +40,12 @@ function draw() {
   labels.forEach((l, k) => {
     const sel = k === selIdx, name = l.name.length > 7 ? l.name.slice(0, 7) : l.name, py = y(l.a);
     const zk = zkKey(l), flash = zk === flashK && now < flashUntil, got = !!zukan.peaks[zk];
-    const col = flash ? GOLD : sel ? '#c0392b' : (l.f100 ? '#8b4513' : '#222');
+    const col = flash ? GOLD : sel ? C.sel : (l.f100 ? C.f100 : C.name);
     [-360, 0, 360].forEach(s => {
       const x = xOf(l.az + s);
       if (x < -20 || x > W + 20) return;
       hits.push({x, k});
-      g.strokeStyle = flash ? GOLD : sel ? '#c0392b' : (l.f100 ? '#8b4513' : '#555'); g.lineWidth = flash ? 3 : sel || l.f100 ? 2 : 1;
+      g.strokeStyle = flash ? GOLD : sel ? C.sel : (l.f100 ? C.f100 : C.line); g.lineWidth = flash ? 3 : sel || l.f100 ? 2 : 1;
       g.beginPath(); g.moveTo(x, 8 + name.length * 14); g.lineTo(x, py); g.stroke();
       g.fillStyle = col; g.font = (flash || sel || l.f100 ? 'bold ' : '') + '13px sans-serif';
       for (let i = 0; i < name.length; i++) g.fillText(name[i], x, 18 + i * 14);
